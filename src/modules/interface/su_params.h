@@ -43,9 +43,9 @@ extern float su_normal_epsilon_f; // [N] minimum force evidence norm
 extern uint8_t su_velocity_modulation_enable; // 0: disabled, 1: enabled
 extern float su_velocity_modulation_a_bar_n;  // [m/s^2] normal acceleration bound
 extern float su_velocity_modulation_v_min;    // [m/s] minimum contact speed for curvature update
-extern float su_contact_velocity_lpf_hz;      // [Hz] shared contact-velocity LPF cutoff
-extern float su_velocity_modulation_n_dot_lpf_hz; // [Hz] normal-derivative LPF cutoff for curvature
-extern float su_velocity_modulation_kappa_lpf_hz; // [Hz] curvature LPF cutoff
+extern float su_contact_velocity_lpf_hz;      // [Hz] shared contact-velocity LPF cutoff; <= 0 bypasses LPF
+extern float su_velocity_modulation_n_dot_lpf_hz; // [Hz] normal-derivative LPF cutoff; <= 0 bypasses LPF
+extern float su_velocity_modulation_kappa_lpf_hz; // [Hz] curvature LPF cutoff; <= 0 bypasses LPF
 extern float su_g_nf;             // [m/(s*N)] gain from normal force tracking error
 extern float su_g_nv;             // [-] gain from normal velocity leakage
 extern float su_nu_n_bar;         // [m/s] symmetric saturation limit for normal velocity command

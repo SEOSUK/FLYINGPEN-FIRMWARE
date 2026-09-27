@@ -147,6 +147,11 @@ static float clampPositive(const float value)
   return (value > 0.0f) ? value : 0.0f;
 }
 
+static bool isLpfBypassed(const float cutoffHz)
+{
+  return !isfinite(cutoffHz) || cutoffHz <= 0.0f;
+}
+
 static float wrapAngleDeg180(const float angleDeg)
 {
   float wrapped = fmodf(angleDeg + 180.0f, 360.0f);
@@ -383,7 +388,7 @@ static void updateContactPointVelocity(void)
     filteredContactVelInitialized = true;
   } else {
     const float cutoffHz = su_contact_velocity_lpf_hz;
-    if (!isfinite(cutoffHz) || cutoffHz <= 0.0f) {
+    if (isLpfBypassed(cutoffHz)) {
       vec3Copy(filteredContactVelWorld, contactVelRawWorld);
     } else {
       const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
@@ -494,7 +499,7 @@ static void updateVelocityModulationNormalDot(void)
   }
 
   const float cutoffHz = su_velocity_modulation_n_dot_lpf_hz;
-  if (!isfinite(cutoffHz) || cutoffHz <= 0.0f) {
+  if (isLpfBypassed(cutoffHz)) {
     vec3Copy(velocityModulationNormalDotWorld, normalEstimateDotWorld);
     return;
   }
@@ -531,7 +536,7 @@ static void updateCurvatureEstimate(void)
   }
 
   const float cutoffHz = su_velocity_modulation_kappa_lpf_hz;
-  if (!curvatureEstimateValid || !isfinite(cutoffHz) || cutoffHz <= 0.0f) {
+  if (!curvatureEstimateValid || isLpfBypassed(cutoffHz)) {
     curvatureEstimate = curvatureRaw;
   } else {
     const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;

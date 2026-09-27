@@ -24,9 +24,9 @@ float su_normal_epsilon_f = 0.01f;       // [N] minimum force evidence norm
 uint8_t su_velocity_modulation_enable = 1;
 float su_velocity_modulation_a_bar_n = 0.013f; // [m/s^2] normal acceleration bound
 float su_velocity_modulation_v_min = 0.01f;    // [m/s] minimum contact speed for curvature update
-float su_contact_velocity_lpf_hz = 0.4f;       // [Hz] shared contact-velocity LPF cutoff
-float su_velocity_modulation_n_dot_lpf_hz = 3.0f; // [Hz] normal-derivative LPF cutoff for curvature
-float su_velocity_modulation_kappa_lpf_hz = 1.0f; // [Hz] curvature LPF cutoff
+float su_contact_velocity_lpf_hz = 0.4f;       // [Hz] shared contact-velocity LPF cutoff; <= 0 bypasses LPF
+float su_velocity_modulation_n_dot_lpf_hz = 3.0f; // [Hz] normal-derivative LPF cutoff; <= 0 bypasses LPF
+float su_velocity_modulation_kappa_lpf_hz = 1.0f; // [Hz] curvature LPF cutoff; <= 0 bypasses LPF
 float su_g_nf             = 1.0f;        // normal force tracking gain
 float su_g_nv             = 2.0f;        // normal velocity damping gain
 float su_nu_n_bar         = 0.08f;       // [m/s] symmetric saturation of normal velocity command
