@@ -12,7 +12,7 @@
 #define SU_POSITION_VELOCITY_RATE_HZ 100
 #define SU_RAD2DEG (180.0f / (float)M_PI)
 #define SU_YAW_ALIGN_SAT_DEG 70.0f
-#define SU_NORMAL_PROJ_VEL_LPF_HZ 0.4f
+#define SU_NORMAL_VELOCITY_LEAKAGE_LPF_HZ 0.4f
 
 static bool referenceInitialized = false;
 static point_t referencePosition;
@@ -29,7 +29,6 @@ static float normalEstimateWorld[3] = {-1.0f, 0.0f, 0.0f};
 static float normalEstimateDotWorld[3] = {0.0f, 0.0f, 0.0f};
 static float contactVelRawWorld[3] = {0.0f, 0.0f, 0.0f};
 static float filteredContactVelWorld[3] = {0.0f, 0.0f, 0.0f};
-static float velocityModulationContactVelWorld[3] = {0.0f, 0.0f, 0.0f};
 static float velocityModulationNormalDotWorld[3] = {0.0f, 0.0f, 0.0f};
 static float curvatureEstimate = 0.0f;
 static float velocityModulationAlpha = 1.0f;
@@ -37,7 +36,6 @@ static float normalVelocityLeakageRaw = 0.0f;
 static float normalVelocityLeakageLpf = 0.0f;
 static bool contactVelRawValid = false;
 static bool filteredContactVelInitialized = false;
-static bool velocityModulationContactVelInitialized = false;
 static bool velocityModulationNormalDotInitialized = false;
 static bool normalEstimateInitialized = false;
 static bool normalEstimateValid = false;
@@ -239,6 +237,18 @@ static bool isAdvancedVelocityControlMode(const uint8_t positionMode)
   return positionMode == SU_POSITION_MODE_VELOCITY;
 }
 
+static void resetContactVelocityFilter(void)
+{
+  contactVelRawWorld[0] = 0.0f;
+  contactVelRawWorld[1] = 0.0f;
+  contactVelRawWorld[2] = 0.0f;
+  contactVelRawValid = false;
+  filteredContactVelWorld[0] = 0.0f;
+  filteredContactVelWorld[1] = 0.0f;
+  filteredContactVelWorld[2] = 0.0f;
+  filteredContactVelInitialized = false;
+}
+
 static void resetNormalEstimator(void)
 {
   for (int row = 0; row < 3; ++row) {
@@ -253,14 +263,6 @@ static void resetNormalEstimator(void)
   normalEstimateDotWorld[2] = 0.0f;
   getFixedNormalWorld(normalForceEvidenceWorld);
   getFixedNormalWorld(normalProjectedCandidateWorld);
-  contactVelRawWorld[0] = 0.0f;
-  contactVelRawWorld[1] = 0.0f;
-  contactVelRawWorld[2] = 0.0f;
-  contactVelRawValid = false;
-  filteredContactVelWorld[0] = 0.0f;
-  filteredContactVelWorld[1] = 0.0f;
-  filteredContactVelWorld[2] = 0.0f;
-  filteredContactVelInitialized = false;
   normalVelocityLeakageRaw = 0.0f;
   normalVelocityLeakageLpf = 0.0f;
   normalEstimateInitialized = false;
@@ -270,10 +272,6 @@ static void resetNormalEstimator(void)
 
 static void resetVelocityModulation(void)
 {
-  velocityModulationContactVelWorld[0] = 0.0f;
-  velocityModulationContactVelWorld[1] = 0.0f;
-  velocityModulationContactVelWorld[2] = 0.0f;
-  velocityModulationContactVelInitialized = false;
   velocityModulationNormalDotWorld[0] = 0.0f;
   velocityModulationNormalDotWorld[1] = 0.0f;
   velocityModulationNormalDotWorld[2] = 0.0f;
@@ -384,41 +382,18 @@ static void updateContactPointVelocity(void)
     vec3Copy(filteredContactVelWorld, contactVelRawWorld);
     filteredContactVelInitialized = true;
   } else {
-    const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
-    const float cutoffHz = SU_NORMAL_PROJ_VEL_LPF_HZ;
-    const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
-    const float alpha = dt / (tau + dt);
-    for (int i = 0; i < 3; ++i) {
-      filteredContactVelWorld[i] +=
-        alpha * (contactVelRawWorld[i] - filteredContactVelWorld[i]);
+    const float cutoffHz = su_contact_velocity_lpf_hz;
+    if (!isfinite(cutoffHz) || cutoffHz <= 0.0f) {
+      vec3Copy(filteredContactVelWorld, contactVelRawWorld);
+    } else {
+      const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
+      const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
+      const float alpha = dt / (tau + dt);
+      for (int i = 0; i < 3; ++i) {
+        filteredContactVelWorld[i] +=
+          alpha * (contactVelRawWorld[i] - filteredContactVelWorld[i]);
+      }
     }
-  }
-}
-
-static void updateVelocityModulationContactVelocity(void)
-{
-  if (!contactVelRawValid) {
-    return;
-  }
-
-  if (!velocityModulationContactVelInitialized) {
-    vec3Copy(velocityModulationContactVelWorld, contactVelRawWorld);
-    velocityModulationContactVelInitialized = true;
-    return;
-  }
-
-  const float cutoffHz = su_velocity_modulation_vc_lpf_hz;
-  if (!isfinite(cutoffHz) || cutoffHz <= 0.0f) {
-    vec3Copy(velocityModulationContactVelWorld, contactVelRawWorld);
-    return;
-  }
-
-  const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
-  const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
-  const float alpha = dt / (tau + dt);
-  for (int i = 0; i < 3; ++i) {
-    velocityModulationContactVelWorld[i] +=
-      alpha * (contactVelRawWorld[i] - velocityModulationContactVelWorld[i]);
   }
 }
 
@@ -454,12 +429,12 @@ static void updateNormalEstimator(void)
   vec3Copy(normalForceEvidenceWorld, qf);
 
   float qg[3];
-  if (su_normal_epsilon_g <= 0.0f) {
+  if (su_normal_epsilon_v <= 0.0f) {
     vec3Copy(qg, qf);
   } else {
-    const float epsilonG = clampPositive(su_normal_epsilon_g);
+    const float epsilonV = clampPositive(su_normal_epsilon_v);
     const float velNormSq = vec3Dot(filteredContactVelWorld, filteredContactVelWorld);
-    const float velProjScale = vec3Dot(filteredContactVelWorld, qf) / (velNormSq + epsilonG);
+    const float velProjScale = vec3Dot(filteredContactVelWorld, qf) / (velNormSq + epsilonV);
 
     qg[0] = qf[0] - filteredContactVelWorld[0] * velProjScale;
     qg[1] = qf[1] - filteredContactVelWorld[1] * velProjScale;
@@ -491,7 +466,7 @@ static void updateNormalEstimator(void)
 
   normalEstimateValid = updateNormalFromDirectionalMemory(nRaw, worldForce, dt);
 
-  const float cutoffHz = SU_NORMAL_PROJ_VEL_LPF_HZ;
+  const float cutoffHz = SU_NORMAL_VELOCITY_LEAKAGE_LPF_HZ;
   const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
   const float alpha = dt / (tau + dt);
 
@@ -535,13 +510,13 @@ static void updateVelocityModulationNormalDot(void)
 
 static void updateCurvatureEstimate(void)
 {
-  if (!velocityModulationContactVelInitialized ||
+  if (!filteredContactVelInitialized ||
       !velocityModulationNormalDotInitialized || !normalEstimateValid) {
     return;
   }
 
-  const float velNormSq = vec3Dot(velocityModulationContactVelWorld,
-                                  velocityModulationContactVelWorld);
+  const float velNormSq = vec3Dot(filteredContactVelWorld,
+                                  filteredContactVelWorld);
   const float vMin = clampPositive(su_velocity_modulation_v_min);
   if (!isfinite(velNormSq) || velNormSq <= 1.0e-12f ||
       sqrtf(velNormSq) <= vMin) {
@@ -550,7 +525,7 @@ static void updateCurvatureEstimate(void)
 
   const float curvatureRaw =
     fabsf(vec3Dot(velocityModulationNormalDotWorld,
-                  velocityModulationContactVelWorld)) / velNormSq;
+                  filteredContactVelWorld)) / velNormSq;
   if (!isfinite(curvatureRaw)) {
     return;
   }
@@ -743,6 +718,7 @@ void suPositionReferenceInit(void)
   referenceYawDegLog = 0.0f;
   lastPositionMode = SU_POSITION_MODE_POSITION;
   lastCommandReference = SU_COMMAND_REFERENCE_END_EFFECTOR;
+  resetContactVelocityFilter();
   resetNormalEstimator();
   resetVelocityModulation();
 
@@ -774,6 +750,7 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
 
   if (positionMode != lastPositionMode) {
     referenceYawCorrectionDeg = 0.0f;
+    resetContactVelocityFilter();
     resetVelocityModulation();
     if (!advancedVelocityControlEnabled) {
       resetNormalEstimator();
@@ -788,7 +765,6 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
     };
     updateContactPointVelocity();
     if (advancedVelocityControlEnabled) {
-      updateVelocityModulationContactVelocity();
       updateNormalEstimator();
       updateVelocityModulationNormalDot();
       updateCurvatureEstimate();
@@ -845,7 +821,7 @@ LOG_ADD(LOG_FLOAT, nHatDotY, &velocityModulationNormalDotWorld[1])
 LOG_ADD(LOG_FLOAT, nHatDotZ, &velocityModulationNormalDotWorld[2])
 LOG_ADD(LOG_FLOAT, kappaHat, &curvatureEstimate)
 LOG_ADD(LOG_FLOAT, alphaStar, &velocityModulationAlpha)
-LOG_ADD(LOG_FLOAT, vcX, &velocityModulationContactVelWorld[0])
-LOG_ADD(LOG_FLOAT, vcY, &velocityModulationContactVelWorld[1])
-LOG_ADD(LOG_FLOAT, vcZ, &velocityModulationContactVelWorld[2])
+LOG_ADD(LOG_FLOAT, vcX, &filteredContactVelWorld[0])
+LOG_ADD(LOG_FLOAT, vcY, &filteredContactVelWorld[1])
+LOG_ADD(LOG_FLOAT, vcZ, &filteredContactVelWorld[2])
 LOG_GROUP_STOP(suVelMod)

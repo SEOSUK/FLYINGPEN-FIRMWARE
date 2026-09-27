@@ -38,12 +38,12 @@ extern float su_r_offset_z;       // [m] body-frame contact offset z
 extern uint8_t su_normal_estimation; // 0: fixed normal, 1: force-dominant normal estimator enabled
 extern float su_normal_beta;      // [1/s] normal-axis memory decay
 extern float su_normal_gamma;     // [1/s] normal-axis tracking gain
-extern float su_normal_epsilon_g; // [m^2/s^2] velocity projection regularization
+extern float su_normal_epsilon_v; // [m^2/s^2] velocity projection regularization
 extern float su_normal_epsilon_f; // [N] minimum force evidence norm
 extern uint8_t su_velocity_modulation_enable; // 0: disabled, 1: enabled
 extern float su_velocity_modulation_a_bar_n;  // [m/s^2] normal acceleration bound
 extern float su_velocity_modulation_v_min;    // [m/s] minimum contact speed for curvature update
-extern float su_velocity_modulation_vc_lpf_hz; // [Hz] contact-velocity LPF cutoff for curvature
+extern float su_contact_velocity_lpf_hz;      // [Hz] shared contact-velocity LPF cutoff
 extern float su_velocity_modulation_n_dot_lpf_hz; // [Hz] normal-derivative LPF cutoff for curvature
 extern float su_velocity_modulation_kappa_lpf_hz; // [Hz] curvature LPF cutoff
 extern float su_g_nf;             // [m/(s*N)] gain from normal force tracking error
