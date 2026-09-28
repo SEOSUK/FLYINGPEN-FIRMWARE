@@ -1,5 +1,6 @@
 #include "su_thrust_effectiveness.h"
 
+#include "su_params.h"
 #include "su_wrench_observer.h"
 
 #include "debug.h"
@@ -8,20 +9,18 @@
 #include <math.h>
 #include <stdbool.h>
 
-#define SU_THRUST_EFFECTIVENESS_GAMMA 20.0f
-#define SU_THRUST_EFFECTIVENESS_RHO   0.1f
+#define SU_THRUST_EFFECTIVENESS_GAMMA 2.0f
+#define SU_THRUST_EFFECTIVENESS_RHO   0.002f
 #define SU_THRUST_EFFECTIVENESS_INIT  1.0f
 #define SU_THRUST_EFFECTIVENESS_EPS   1.0e-6f
-#define SU_THRUST_EFFECTIVENESS_KF    5.0f
-#define SU_THRUST_EFFECTIVENESS_KP    2.9544511501f
-#define SU_THRUST_EFFECTIVENESS_KTAU  30.0f
-#define SU_THRUST_EFFECTIVENESS_KPTAU 10.9544511501f
 #define SU_THRUST_EFFECTIVENESS_ALPHA 1.0f
 
 static float su_eta_hat = SU_THRUST_EFFECTIVENESS_INIT;
 static float su_nominal_force_world[3] = {0.0f, 0.0f, 0.0f};
 static float su_point_contact_residual_world[3] = {0.0f, 0.0f, 0.0f};
-static float su_corrected_force_world[3] = {0.0f, 0.0f, 0.0f};
+static float su_force_bar_world[3] = {0.0f, 0.0f, 0.0f};
+static float su_torque_bar_world[3] = {0.0f, 0.0f, 0.0f};
+static float su_contact_force_world[3] = {0.0f, 0.0f, 0.0f};
 
 static float su_matched_force_signal_world[3] = {0.0f, 0.0f, 0.0f};
 static float su_matched_force_dot_world[3] = {0.0f, 0.0f, 0.0f};
@@ -86,6 +85,24 @@ static void sanitizeVec3(float vec[3])
   vec[2] = clampFinite(vec[2]);
 }
 
+static void reconstructContactForce(float outF[3], const float forceBar[3],
+                                    const float torqueBar[3], const float contactOffset[3])
+{
+  const float rSquared = vec3Dot(contactOffset, contactOffset);
+  if (!isfinite(rSquared) || rSquared <= 1.0e-12f) {
+    vec3Copy(outF, forceBar);
+    return;
+  }
+
+  const float parallelScale = vec3Dot(contactOffset, forceBar) / rSquared;
+  float rCrossTorque[3];
+  vec3Cross(rCrossTorque, contactOffset, torqueBar);
+  for (int i = 0; i < 3; ++i) {
+    outF[i] = contactOffset[i] * parallelScale - rCrossTorque[i] / rSquared;
+  }
+  sanitizeVec3(outF);
+}
+
 static void lpf1Vec3(float out[3], const float input[3], float alpha)
 {
   for (int i = 0; i < 3; ++i) {
@@ -112,7 +129,9 @@ void suThrustEffectivenessInit(void)
   su_eta_hat = SU_THRUST_EFFECTIVENESS_INIT;
   vec3Copy(su_nominal_force_world, (const float[3]){0.0f, 0.0f, 0.0f});
   vec3Copy(su_point_contact_residual_world, (const float[3]){0.0f, 0.0f, 0.0f});
-  vec3Copy(su_corrected_force_world, (const float[3]){0.0f, 0.0f, 0.0f});
+  vec3Copy(su_force_bar_world, (const float[3]){0.0f, 0.0f, 0.0f});
+  vec3Copy(su_torque_bar_world, (const float[3]){0.0f, 0.0f, 0.0f});
+  vec3Copy(su_contact_force_world, (const float[3]){0.0f, 0.0f, 0.0f});
   vec3Copy(su_matched_force_signal_world, (const float[3]){0.0f, 0.0f, 0.0f});
   vec3Copy(su_matched_force_dot_world, (const float[3]){0.0f, 0.0f, 0.0f});
   vec3Copy(su_matched_force_output_world, (const float[3]){0.0f, 0.0f, 0.0f});
@@ -140,26 +159,26 @@ void suThrustEffectivenessUpdate(const state_t *state,
   float contactOffsetWorld[3];
   float nominalForceWorld[3];
   float nominalTorqueWorld[3];
-  float lumpedForceWorld[3];
-  float lumpedTorqueWorld[3];
+  float forceLHatWorld[3];
+  float torqueLHatWorld[3];
 
   suWrenchObserverGetContactOffsetWorld(contactOffsetWorld);
   suWrenchObserverGetWorldInputForce(nominalForceWorld);
   suWrenchObserverGetWorldInputTorque(nominalTorqueWorld);
-  suWrenchObserverGetWorldForce(lumpedForceWorld);
-  suWrenchObserverGetWorldTorque(lumpedTorqueWorld);
+  suWrenchObserverGetWorldForce(forceLHatWorld);
+  suWrenchObserverGetWorldTorque(torqueLHatWorld);
   sanitizeVec3(contactOffsetWorld);
   sanitizeVec3(nominalForceWorld);
   sanitizeVec3(nominalTorqueWorld);
-  sanitizeVec3(lumpedForceWorld);
-  sanitizeVec3(lumpedTorqueWorld);
+  sanitizeVec3(forceLHatWorld);
+  sanitizeVec3(torqueLHatWorld);
 
   updateMatchedSignal(su_matched_force_signal_world, su_matched_force_dot_world,
                       su_matched_force_output_world, nominalForceWorld, dt,
-                      SU_THRUST_EFFECTIVENESS_KF, SU_THRUST_EFFECTIVENESS_KP);
+                      su_Ktau, su_Kh);
   updateMatchedSignal(su_matched_torque_signal_world, su_matched_torque_dot_world,
                       su_matched_torque_output_world, nominalTorqueWorld, dt,
-                      SU_THRUST_EFFECTIVENESS_KTAU, SU_THRUST_EFFECTIVENESS_KPTAU);
+                      su_Ktau, su_Kh);
   vec3Copy(su_nominal_force_world, su_matched_force_output_world);
 
   float yEta[3];
@@ -168,8 +187,8 @@ void suThrustEffectivenessUpdate(const state_t *state,
   vec3Sub(yEta, rCrossMatchedForce, su_matched_torque_output_world);
 
   float rCrossForceRaw[3];
-  vec3Cross(rCrossForceRaw, contactOffsetWorld, lumpedForceWorld);
-  vec3Sub(su_point_contact_residual_world, rCrossForceRaw, lumpedTorqueWorld);
+  vec3Cross(rCrossForceRaw, contactOffsetWorld, forceLHatWorld);
+  vec3Sub(su_point_contact_residual_world, rCrossForceRaw, torqueLHatWorld);
 
   float epsEta[3];
   float etaOffsetY[3];
@@ -183,10 +202,20 @@ void suThrustEffectivenessUpdate(const state_t *state,
     su_eta_hat = SU_THRUST_EFFECTIVENESS_EPS;
   }
 
-  float etaCorrection[3];
-  vec3Scale(etaCorrection, su_matched_force_output_world, su_eta_hat - SU_THRUST_EFFECTIVENESS_INIT);
-  vec3Sub(su_corrected_force_world, lumpedForceWorld, etaCorrection);
-  sanitizeVec3(su_corrected_force_world);
+  const float etaOffset = su_eta_hat - SU_THRUST_EFFECTIVENESS_INIT;
+  float etaForceCorrection[3];
+  float etaTorqueCorrection[3];
+  vec3Scale(etaForceCorrection, su_matched_force_output_world, etaOffset);
+  vec3Scale(etaTorqueCorrection, su_matched_torque_output_world, etaOffset);
+  // Paper Eq. (7): common-mode thrust-effectiveness compensation.
+  vec3Sub(su_force_bar_world, forceLHatWorld, etaForceCorrection);
+  vec3Sub(su_torque_bar_world, torqueLHatWorld, etaTorqueCorrection);
+  sanitizeVec3(su_force_bar_world);
+  sanitizeVec3(su_torque_bar_world);
+
+  // Paper Eq. (8): contact-consistent force reconstruction.
+  reconstructContactForce(su_contact_force_world, su_force_bar_world,
+                          su_torque_bar_world, contactOffsetWorld);
 }
 
 void suThrustEffectivenessGetMatchedForceWorld(float outF[3])
@@ -205,12 +234,33 @@ void suThrustEffectivenessGetPointContactResidualWorld(float outE[3])
   vec3Copy(outE, su_point_contact_residual_world);
 }
 
-void suThrustEffectivenessGetCorrectedForceWorld(float outF[3])
+void suThrustEffectivenessGetForceBarWorld(float outF[3])
 {
   if (!outF) {
     return;
   }
-  vec3Copy(outF, su_corrected_force_world);
+  vec3Copy(outF, su_force_bar_world);
+}
+
+void suThrustEffectivenessGetTorqueBarWorld(float outTau[3])
+{
+  if (!outTau) {
+    return;
+  }
+  vec3Copy(outTau, su_torque_bar_world);
+}
+
+void suThrustEffectivenessGetContactForceWorld(float outF[3])
+{
+  if (!outF) {
+    return;
+  }
+  vec3Copy(outF, su_contact_force_world);
+}
+
+void suThrustEffectivenessGetCorrectedForceWorld(float outF[3])
+{
+  suThrustEffectivenessGetForceBarWorld(outF);
 }
 
 void suThrustEffectivenessGetEtaHat(float *outEta)
@@ -229,7 +279,13 @@ LOG_ADD(LOG_FLOAT, matchFz, &su_nominal_force_world[2])
 LOG_ADD(LOG_FLOAT, epsTx, &su_point_contact_residual_world[0])
 LOG_ADD(LOG_FLOAT, epsTy, &su_point_contact_residual_world[1])
 LOG_ADD(LOG_FLOAT, epsTz, &su_point_contact_residual_world[2])
-LOG_ADD(LOG_FLOAT, corrFx, &su_corrected_force_world[0])
-LOG_ADD(LOG_FLOAT, corrFy, &su_corrected_force_world[1])
-LOG_ADD(LOG_FLOAT, corrFz, &su_corrected_force_world[2])
+LOG_ADD(LOG_FLOAT, fBarX, &su_force_bar_world[0])
+LOG_ADD(LOG_FLOAT, fBarY, &su_force_bar_world[1])
+LOG_ADD(LOG_FLOAT, fBarZ, &su_force_bar_world[2])
+LOG_ADD(LOG_FLOAT, tauBarX, &su_torque_bar_world[0])
+LOG_ADD(LOG_FLOAT, tauBarY, &su_torque_bar_world[1])
+LOG_ADD(LOG_FLOAT, tauBarZ, &su_torque_bar_world[2])
+LOG_ADD(LOG_FLOAT, fContactX, &su_contact_force_world[0])
+LOG_ADD(LOG_FLOAT, fContactY, &su_contact_force_world[1])
+LOG_ADD(LOG_FLOAT, fContactZ, &su_contact_force_world[2])
 LOG_GROUP_STOP(suThrustEff)

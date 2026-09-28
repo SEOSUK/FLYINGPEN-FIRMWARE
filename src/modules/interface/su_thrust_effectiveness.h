@@ -16,6 +16,10 @@ void suThrustEffectivenessUpdate(const state_t *state,
 
 void suThrustEffectivenessGetMatchedForceWorld(float outF[3]);
 void suThrustEffectivenessGetPointContactResidualWorld(float outE[3]);
+void suThrustEffectivenessGetForceBarWorld(float outF[3]);
+void suThrustEffectivenessGetTorqueBarWorld(float outTau[3]);
+void suThrustEffectivenessGetContactForceWorld(float outF[3]);
+// Backward-compatible alias for suThrustEffectivenessGetForceBarWorld().
 void suThrustEffectivenessGetCorrectedForceWorld(float outF[3]);
 void suThrustEffectivenessGetEtaHat(float *outEta);
 

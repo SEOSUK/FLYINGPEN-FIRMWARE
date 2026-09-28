@@ -22,7 +22,6 @@ obj-y += su_wrench_observer.o   # SEUK
 obj-y += su_thrust_effectiveness.o   # SEUK
 obj-y += su_params.o   # SEUK
 obj-y += su_position_trigger.o   # SEUK
-obj-y += su_trajectory_generator.o   # SEUK
 obj-y += su_position_reference.o   # SEUK
 obj-y += su_vel_from_pos.o   # SEUK
 obj-y += led_deck_controller.o

@@ -395,7 +395,7 @@ static void stabilizerTask(void* param)
         float velFromPosWorld[3];
         suVelFromPosGetWorld(velFromPosWorld);
 
-        suWrenchObserverUpdate(&state, &motorThrustBatCompUncapped, &motorPwm, &sensorData.gyro,
+        suWrenchObserverUpdate(&state, &motorPwm, &sensorData.gyro,
                                velFromPosWorld, 1.0f / (float)SU_WRENCH_RATE_HZ);
         suThrustEffectivenessUpdate(&state, &motorThrustBatCompUncapped, &sensorData.gyro,
                                    velFromPosWorld, 1.0f / (float)SU_WRENCH_RATE_HZ);

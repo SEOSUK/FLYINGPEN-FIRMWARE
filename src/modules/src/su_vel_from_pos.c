@@ -69,7 +69,7 @@ void suVelFromPosUpdate(const state_t *state, float dt)
   su_pos_prev[1] = py;
   su_pos_prev[2] = pz;
 
-  // 1st-order LPF (cutoff ≈ 5 Hz)
+  // 1st-order LPF (cutoff ≈ 1 Hz)
   const float TWO_PI = 6.28318530718f;
   const float fc     = 1.0f;  // [Hz]
   float alpha_v = 1.0f - expf(-TWO_PI * fc * dt);

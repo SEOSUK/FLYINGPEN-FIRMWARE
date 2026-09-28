@@ -6,14 +6,13 @@
 #include "log.h"
 #include "su_params.h"
 #include "su_position_trigger.h"
-#include "su_trajectory_generator.h"
+#include "su_thrust_effectiveness.h"
 #include "su_wrench_observer.h"
 
 #define SU_POSITION_VELOCITY_RATE_HZ 100
 #define SU_RAD2DEG (180.0f / (float)M_PI)
 #define SU_YAW_ALIGN_SAT_DEG 70.0f
-#define SU_NORMAL_EST_EIG_ITERS 6
-#define SU_NORMAL_PROJ_VEL_LPF_HZ 0.4f
+#define SU_NORMAL_VELOCITY_LEAKAGE_LPF_HZ 0.4f
 
 static bool referenceInitialized = false;
 static point_t referencePosition;
@@ -21,20 +20,26 @@ static point_t eeReferenceLog;
 static float referenceBaseYawDeg = 0.0f;
 static float referenceYawCorrectionDeg = 0.0f;
 static uint8_t lastPositionMode = SU_POSITION_MODE_POSITION;
-static uint8_t lastTrajectoryMode = SU_TRAJECTORY_NONE;
 static uint8_t lastCommandReference = SU_COMMAND_REFERENCE_END_EFFECTOR;
-static point_t trajectoryLocalOffsetPrev;
-static bool trajectoryLocalOffsetInitialized = false;
 static float referenceYawDegLog = 0.0f;
 static float normalEstimatorMatrix[3][3];
 static float normalForceEvidenceWorld[3] = {-1.0f, 0.0f, 0.0f};
 static float normalProjectedCandidateWorld[3] = {-1.0f, 0.0f, 0.0f};
 static float normalEstimateWorld[3] = {-1.0f, 0.0f, 0.0f};
+static float normalEstimateDotWorld[3] = {0.0f, 0.0f, 0.0f};
+static float contactVelRawWorld[3] = {0.0f, 0.0f, 0.0f};
 static float filteredContactVelWorld[3] = {0.0f, 0.0f, 0.0f};
+static float velocityModulationNormalDotWorld[3] = {0.0f, 0.0f, 0.0f};
+static float curvatureEstimate = 0.0f;
+static float velocityModulationAlpha = 1.0f;
 static float normalVelocityLeakageRaw = 0.0f;
 static float normalVelocityLeakageLpf = 0.0f;
+static bool contactVelRawValid = false;
 static bool filteredContactVelInitialized = false;
+static bool velocityModulationNormalDotInitialized = false;
 static bool normalEstimateInitialized = false;
+static bool normalEstimateValid = false;
+static bool curvatureEstimateValid = false;
 static bool normalVelocityLeakageInitialized = false;
 
 static float wrapAngleDeg180(const float angleDeg);
@@ -142,6 +147,11 @@ static float clampPositive(const float value)
   return (value > 0.0f) ? value : 0.0f;
 }
 
+static bool isLpfBypassed(const float cutoffHz)
+{
+  return !isfinite(cutoffHz) || cutoffHz <= 0.0f;
+}
+
 static float wrapAngleDeg180(const float angleDeg)
 {
   float wrapped = fmodf(angleDeg + 180.0f, 360.0f);
@@ -175,13 +185,6 @@ static void vec3Copy(float out[3], const float in[3])
   out[2] = in[2];
 }
 
-static void vec3Scale(float out[3], const float in[3], const float scale)
-{
-  out[0] = in[0] * scale;
-  out[1] = in[1] * scale;
-  out[2] = in[2] * scale;
-}
-
 static void vec3Cross(float out[3], const float a[3], const float b[3])
 {
   out[0] = a[1] * b[2] - a[2] * b[1];
@@ -197,7 +200,7 @@ static float vec3Norm(const float v[3])
 static bool vec3Normalize(float out[3], const float in[3], const float eps)
 {
   const float norm = vec3Norm(in);
-  if (norm <= eps) {
+  if (!isfinite(norm) || norm <= eps) {
     return false;
   }
 
@@ -206,6 +209,11 @@ static bool vec3Normalize(float out[3], const float in[3], const float eps)
   out[1] = in[1] * invNorm;
   out[2] = in[2] * invNorm;
   return true;
+}
+
+static bool vec3IsFinite(const float v[3])
+{
+  return isfinite(v[0]) && isfinite(v[1]) && isfinite(v[2]);
 }
 
 static void getFixedNormalWorld(float outNormal[3])
@@ -234,6 +242,18 @@ static bool isAdvancedVelocityControlMode(const uint8_t positionMode)
   return positionMode == SU_POSITION_MODE_VELOCITY;
 }
 
+static void resetContactVelocityFilter(void)
+{
+  contactVelRawWorld[0] = 0.0f;
+  contactVelRawWorld[1] = 0.0f;
+  contactVelRawWorld[2] = 0.0f;
+  contactVelRawValid = false;
+  filteredContactVelWorld[0] = 0.0f;
+  filteredContactVelWorld[1] = 0.0f;
+  filteredContactVelWorld[2] = 0.0f;
+  filteredContactVelInitialized = false;
+}
+
 static void resetNormalEstimator(void)
 {
   for (int row = 0; row < 3; ++row) {
@@ -243,16 +263,27 @@ static void resetNormalEstimator(void)
   }
 
   getFixedNormalWorld(normalEstimateWorld);
+  normalEstimateDotWorld[0] = 0.0f;
+  normalEstimateDotWorld[1] = 0.0f;
+  normalEstimateDotWorld[2] = 0.0f;
   getFixedNormalWorld(normalForceEvidenceWorld);
   getFixedNormalWorld(normalProjectedCandidateWorld);
-  filteredContactVelWorld[0] = 0.0f;
-  filteredContactVelWorld[1] = 0.0f;
-  filteredContactVelWorld[2] = 0.0f;
   normalVelocityLeakageRaw = 0.0f;
   normalVelocityLeakageLpf = 0.0f;
-  filteredContactVelInitialized = false;
   normalEstimateInitialized = false;
+  normalEstimateValid = false;
   normalVelocityLeakageInitialized = false;
+}
+
+static void resetVelocityModulation(void)
+{
+  velocityModulationNormalDotWorld[0] = 0.0f;
+  velocityModulationNormalDotWorld[1] = 0.0f;
+  velocityModulationNormalDotWorld[2] = 0.0f;
+  velocityModulationNormalDotInitialized = false;
+  curvatureEstimate = 0.0f;
+  curvatureEstimateValid = false;
+  velocityModulationAlpha = 1.0f;
 }
 
 static void getEstimatedNormalWorld(float outNormal[3])
@@ -282,58 +313,114 @@ static void getControlNormalWorld(float outNormal[3])
   }
 }
 
-static void computeDominantEigenvectorSymmetric3x3(float outVec[3], const float A[3][3], const float fallback[3])
+static bool updateNormalFromDirectionalMemory(const float candidate[3],
+                                              const float correctedForce[3],
+                                              const float dt)
 {
-  float iterVec[3];
-  if (!vec3Normalize(iterVec, fallback, 1e-6f)) {
-    getFixedNormalWorld(iterVec);
-  }
+  bool updateValid = true;
 
-  for (int iter = 0; iter < SU_NORMAL_EST_EIG_ITERS; ++iter) {
-    float nextVec[3] = {
-      A[0][0] * iterVec[0] + A[0][1] * iterVec[1] + A[0][2] * iterVec[2],
-      A[1][0] * iterVec[0] + A[1][1] * iterVec[1] + A[1][2] * iterVec[2],
-      A[2][0] * iterVec[0] + A[2][1] * iterVec[1] + A[2][2] * iterVec[2],
+  if (!normalEstimateInitialized) {
+    vec3Copy(normalEstimateWorld, candidate);
+    normalEstimateDotWorld[0] = 0.0f;
+    normalEstimateDotWorld[1] = 0.0f;
+    normalEstimateDotWorld[2] = 0.0f;
+    normalEstimateInitialized = true;
+  } else {
+    const float lnN[3] = {
+      normalEstimatorMatrix[0][0] * normalEstimateWorld[0] +
+        normalEstimatorMatrix[0][1] * normalEstimateWorld[1] +
+        normalEstimatorMatrix[0][2] * normalEstimateWorld[2],
+      normalEstimatorMatrix[1][0] * normalEstimateWorld[0] +
+        normalEstimatorMatrix[1][1] * normalEstimateWorld[1] +
+        normalEstimatorMatrix[1][2] * normalEstimateWorld[2],
+      normalEstimatorMatrix[2][0] * normalEstimateWorld[0] +
+        normalEstimatorMatrix[2][1] * normalEstimateWorld[1] +
+        normalEstimatorMatrix[2][2] * normalEstimateWorld[2],
     };
+    const float scalar = vec3Dot(normalEstimateWorld, lnN);
+    const float gamma = clampPositive(su_normal_gamma);
 
-    if (!vec3Normalize(iterVec, nextVec, 1e-9f)) {
-      break;
+    for (int i = 0; i < 3; ++i) {
+      normalEstimateDotWorld[i] = gamma *
+        (lnN[i] - normalEstimateWorld[i] * scalar);
+    }
+
+    const float estimateNext[3] = {
+      normalEstimateWorld[0] + dt * normalEstimateDotWorld[0],
+      normalEstimateWorld[1] + dt * normalEstimateDotWorld[1],
+      normalEstimateWorld[2] + dt * normalEstimateDotWorld[2],
+    };
+    float estimateNormalized[3];
+    if (vec3Normalize(estimateNormalized, estimateNext, 1e-6f)) {
+      vec3Copy(normalEstimateWorld, estimateNormalized);
+    } else {
+      vec3Copy(normalEstimateWorld, candidate);
+      normalEstimateDotWorld[0] = 0.0f;
+      normalEstimateDotWorld[1] = 0.0f;
+      normalEstimateDotWorld[2] = 0.0f;
+      updateValid = false;
     }
   }
 
-  vec3Copy(outVec, iterVec);
+  if (vec3Dot(normalEstimateWorld, correctedForce) < 0.0f) {
+    for (int i = 0; i < 3; ++i) {
+      normalEstimateWorld[i] = -normalEstimateWorld[i];
+      normalEstimateDotWorld[i] = -normalEstimateDotWorld[i];
+    }
+  }
+
+  return updateValid && vec3IsFinite(normalEstimateWorld) &&
+         vec3IsFinite(normalEstimateDotWorld);
 }
 
-static void updateContactPointVelocityLpf(void)
+static void updateContactPointVelocity(void)
 {
-  float contactVelWorld[3] = {0.0f, 0.0f, 0.0f};
+  float contactVelWorld[3];
   suWrenchObserverGetContactPointVelocityWorld(contactVelWorld);
+  vec3Copy(contactVelRawWorld, contactVelWorld);
+  contactVelRawValid = vec3IsFinite(contactVelRawWorld);
+  if (!contactVelRawValid) {
+    return;
+  }
 
   if (!filteredContactVelInitialized) {
-    vec3Copy(filteredContactVelWorld, contactVelWorld);
+    vec3Copy(filteredContactVelWorld, contactVelRawWorld);
     filteredContactVelInitialized = true;
   } else {
-    const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
-    const float cutoffHz = SU_NORMAL_PROJ_VEL_LPF_HZ;
-    const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
-    const float alpha = dt / (tau + dt);
-
-    for (int i = 0; i < 3; ++i) {
-      filteredContactVelWorld[i] += alpha * (contactVelWorld[i] - filteredContactVelWorld[i]);
+    const float cutoffHz = su_contact_velocity_lpf_hz;
+    if (isLpfBypassed(cutoffHz)) {
+      vec3Copy(filteredContactVelWorld, contactVelRawWorld);
+    } else {
+      const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
+      const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
+      const float alpha = dt / (tau + dt);
+      for (int i = 0; i < 3; ++i) {
+        filteredContactVelWorld[i] +=
+          alpha * (contactVelRawWorld[i] - filteredContactVelWorld[i]);
+      }
     }
   }
 }
 
 static void updateNormalEstimator(void)
 {
+  normalEstimateValid = false;
+
+  if (!contactVelRawValid) {
+    return;
+  }
+
   if (!isNormalEstimatorEnabled()) {
     getFixedNormalWorld(normalEstimateWorld);
+    normalEstimateDotWorld[0] = 0.0f;
+    normalEstimateDotWorld[1] = 0.0f;
+    normalEstimateDotWorld[2] = 0.0f;
     normalEstimateInitialized = false;
     return;
   }
 
   float worldForce[3] = {0.0f, 0.0f, 0.0f};
-  suWrenchObserverGetWorldForce(worldForce);
+  suThrustEffectivenessGetContactForceWorld(worldForce);
 
   const float epsilonF = clampPositive(su_normal_epsilon_f);
   if (vec3Norm(worldForce) <= epsilonF) {
@@ -347,12 +434,12 @@ static void updateNormalEstimator(void)
   vec3Copy(normalForceEvidenceWorld, qf);
 
   float qg[3];
-  if (su_normal_epsilon_g <= 0.0f) {
+  if (su_normal_epsilon_v <= 0.0f) {
     vec3Copy(qg, qf);
   } else {
-    const float epsilonG = clampPositive(su_normal_epsilon_g);
+    const float epsilonV = clampPositive(su_normal_epsilon_v);
     const float velNormSq = vec3Dot(filteredContactVelWorld, filteredContactVelWorld);
-    const float velProjScale = vec3Dot(filteredContactVelWorld, qf) / (velNormSq + epsilonG);
+    const float velProjScale = vec3Dot(filteredContactVelWorld, qf) / (velNormSq + epsilonV);
 
     qg[0] = qf[0] - filteredContactVelWorld[0] * velProjScale;
     qg[1] = qf[1] - filteredContactVelWorld[1] * velProjScale;
@@ -382,17 +469,9 @@ static void updateNormalEstimator(void)
     }
   }
 
-  float candidate[3];
-  const float *seed = normalEstimateInitialized ? normalEstimateWorld : nRaw;
-  computeDominantEigenvectorSymmetric3x3(candidate, normalEstimatorMatrix, seed);
-  if (vec3Dot(candidate, seed) < 0.0f) {
-    vec3Scale(candidate, candidate, -1.0f);
-  }
+  normalEstimateValid = updateNormalFromDirectionalMemory(nRaw, worldForce, dt);
 
-  vec3Copy(normalEstimateWorld, candidate);
-  normalEstimateInitialized = true;
-
-  const float cutoffHz = SU_NORMAL_PROJ_VEL_LPF_HZ;
+  const float cutoffHz = SU_NORMAL_VELOCITY_LEAKAGE_LPF_HZ;
   const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
   const float alpha = dt / (tau + dt);
 
@@ -405,6 +484,103 @@ static void updateNormalEstimator(void)
   } else {
     normalVelocityLeakageLpf += alpha * (normalVelocityLeakageRaw - normalVelocityLeakageLpf);
   }
+}
+
+static void updateVelocityModulationNormalDot(void)
+{
+  if (!normalEstimateValid || !vec3IsFinite(normalEstimateDotWorld)) {
+    return;
+  }
+
+  if (!velocityModulationNormalDotInitialized) {
+    vec3Copy(velocityModulationNormalDotWorld, normalEstimateDotWorld);
+    velocityModulationNormalDotInitialized = true;
+    return;
+  }
+
+  const float cutoffHz = su_velocity_modulation_n_dot_lpf_hz;
+  if (isLpfBypassed(cutoffHz)) {
+    vec3Copy(velocityModulationNormalDotWorld, normalEstimateDotWorld);
+    return;
+  }
+
+  const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
+  const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
+  const float alpha = dt / (tau + dt);
+  for (int i = 0; i < 3; ++i) {
+    velocityModulationNormalDotWorld[i] +=
+      alpha * (normalEstimateDotWorld[i] - velocityModulationNormalDotWorld[i]);
+  }
+}
+
+static void updateCurvatureEstimate(void)
+{
+  if (!filteredContactVelInitialized ||
+      !velocityModulationNormalDotInitialized || !normalEstimateValid) {
+    return;
+  }
+
+  const float velNormSq = vec3Dot(filteredContactVelWorld,
+                                  filteredContactVelWorld);
+  const float vMin = clampPositive(su_velocity_modulation_v_min);
+  if (!isfinite(velNormSq) || velNormSq <= 1.0e-12f ||
+      sqrtf(velNormSq) <= vMin) {
+    return;
+  }
+
+  const float curvatureRaw =
+    fabsf(vec3Dot(velocityModulationNormalDotWorld,
+                  filteredContactVelWorld)) / velNormSq;
+  if (!isfinite(curvatureRaw)) {
+    return;
+  }
+
+  const float cutoffHz = su_velocity_modulation_kappa_lpf_hz;
+  if (!curvatureEstimateValid || isLpfBypassed(cutoffHz)) {
+    curvatureEstimate = curvatureRaw;
+  } else {
+    const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
+    const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
+    const float alpha = dt / (tau + dt);
+    curvatureEstimate += alpha * (curvatureRaw - curvatureEstimate);
+  }
+  curvatureEstimateValid = true;
+}
+
+static void applyVelocityModulation(float velocityCmdLocal[3])
+{
+  velocityModulationAlpha = 1.0f;
+  if (!velocityCmdLocal || su_velocity_modulation_enable == 0 ||
+      !curvatureEstimateValid) {
+    return;
+  }
+
+  const float tangentialVelocityNormSq =
+    velocityCmdLocal[1] * velocityCmdLocal[1] +
+    velocityCmdLocal[2] * velocityCmdLocal[2];
+  const float aBarN = su_velocity_modulation_a_bar_n;
+  const float nominalNormalAcceleration =
+    curvatureEstimate * tangentialVelocityNormSq;
+  if (!isfinite(tangentialVelocityNormSq) ||
+      !isfinite(nominalNormalAcceleration) ||
+      nominalNormalAcceleration <= 1.0e-12f ||
+      !isfinite(aBarN) || aBarN <= 0.0f) {
+    return;
+  }
+
+  float alpha = sqrtf(aBarN / nominalNormalAcceleration);
+  if (!isfinite(alpha)) {
+    return;
+  }
+  if (alpha > 1.0f) {
+    alpha = 1.0f;
+  } else if (alpha < 0.0f) {
+    alpha = 0.0f;
+  }
+
+  velocityModulationAlpha = alpha;
+  velocityCmdLocal[1] *= alpha;
+  velocityCmdLocal[2] *= alpha;
 }
 
 static void buildContactFrame(const float normalWorld[3], float t1World[3], float t2World[3])
@@ -485,7 +661,7 @@ static void applyPreloadVelocityControl(float velocityCmdWorld[3],
   getControlNormalWorld(normalWorld);
 
   float worldForce[3] = {0.0f, 0.0f, 0.0f};
-  suWrenchObserverGetWorldForce(worldForce);
+  suThrustEffectivenessGetContactForceWorld(worldForce);
 
   const float f_n = vec3Dot(normalWorld, worldForce);
   const float stateVelocityWorld[3] = {
@@ -546,16 +722,12 @@ void suPositionReferenceInit(void)
   referenceYawCorrectionDeg = 0.0f;
   referenceYawDegLog = 0.0f;
   lastPositionMode = SU_POSITION_MODE_POSITION;
-  lastTrajectoryMode = SU_TRAJECTORY_NONE;
   lastCommandReference = SU_COMMAND_REFERENCE_END_EFFECTOR;
-  trajectoryLocalOffsetPrev.x = 0.0f;
-  trajectoryLocalOffsetPrev.y = 0.0f;
-  trajectoryLocalOffsetPrev.z = 0.0f;
-  trajectoryLocalOffsetInitialized = false;
+  resetContactVelocityFilter();
   resetNormalEstimator();
+  resetVelocityModulation();
 
   suPositionTriggerInit();
-  suTrajectoryGeneratorInit();
 }
 
 void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *state, stabilizerStep_t stabilizerStep)
@@ -571,7 +743,6 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
   }
 
   const uint8_t positionMode = suPositionTriggerGetMode();
-  const uint8_t trajectoryMode = suPositionTriggerGetTrajectoryMode();
   const uint8_t commandReference = suPositionTriggerGetCommandReference();
   const float forceDesired = suPositionTriggerGetForceDesired();
   const bool advancedVelocityControlEnabled = isAdvancedVelocityControlMode(positionMode);
@@ -583,104 +754,46 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
   referenceBaseYawDeg = wrapAngleDeg180(setpoint->attitude.yaw);
 
   if (positionMode != lastPositionMode) {
-    trajectoryLocalOffsetInitialized = false;
     referenceYawCorrectionDeg = 0.0f;
+    resetContactVelocityFilter();
+    resetVelocityModulation();
     if (!advancedVelocityControlEnabled) {
-      suTrajectoryGeneratorDeactivate();
       resetNormalEstimator();
     }
   }
 
-  const float velocityReferenceYawDeg = getReferenceYawDeg();
-  if (advancedVelocityControlEnabled && lastPositionMode == SU_POSITION_MODE_POSITION) {
-    if (trajectoryMode != SU_TRAJECTORY_NONE) {
-      suTrajectoryGeneratorStart(trajectoryMode, &referencePosition, velocityReferenceYawDeg);
-    } else {
-      suTrajectoryGeneratorDeactivate();
-    }
-  }
-
-  if (advancedVelocityControlEnabled && trajectoryMode != lastTrajectoryMode) {
-    trajectoryLocalOffsetInitialized = false;
-    if (trajectoryMode == SU_TRAJECTORY_NONE) {
-      suTrajectoryGeneratorDeactivate();
-    } else {
-      suTrajectoryGeneratorStart(trajectoryMode, &referencePosition, velocityReferenceYawDeg);
-    }
-  }
-
-  if (!advancedVelocityControlEnabled) {
-    suTrajectoryGeneratorDeactivate();
-  }
-
-  if (trajectoryMode == SU_TRAJECTORY_NONE || !advancedVelocityControlEnabled) {
-    if (RATE_DO_EXECUTE(SU_POSITION_VELOCITY_RATE_HZ, stabilizerStep)) {
-      float velocityCmdWorld[3] = {
-        setpoint->position.x,
-        setpoint->position.y,
-        setpoint->position.z,
-      };
-      updateContactPointVelocityLpf();
-      if (advancedVelocityControlEnabled) {
-        updateNormalEstimator();
-        applyTangentialVelocityControl(velocityCmdWorld);
-        if (isPreloadVelocityControlActive(positionMode, forceDesired)) {
-          applyPreloadVelocityControl(velocityCmdWorld, state, forceDesired);
-        }
-      }
-
-      referencePosition.x += velocityCmdWorld[0] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
-      referencePosition.y += velocityCmdWorld[1] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
-      referencePosition.z += velocityCmdWorld[2] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
-
-      if (advancedVelocityControlEnabled) {
-        updateYawFromMobForce();
-      } else {
-        referenceYawCorrectionDeg = 0.0f;
-      }
-    }
-  } else {
-    if (RATE_DO_EXECUTE(SU_POSITION_VELOCITY_RATE_HZ, stabilizerStep)) {
-      updateContactPointVelocityLpf();
+  if (RATE_DO_EXECUTE(SU_POSITION_VELOCITY_RATE_HZ, stabilizerStep)) {
+    float velocityCmdWorld[3] = {
+      setpoint->position.x,
+      setpoint->position.y,
+      setpoint->position.z,
+    };
+    updateContactPointVelocity();
+    if (advancedVelocityControlEnabled) {
       updateNormalEstimator();
-      point_t trajectoryLocalOffset = {0.0f, 0.0f, 0.0f};
-      float trajectoryYawDeg = velocityReferenceYawDeg;
-      suTrajectoryGeneratorUpdateLocalOffset(
-        trajectoryMode, stabilizerStep, &trajectoryLocalOffset, &trajectoryYawDeg);
-
-      float velocityCmdWorld[3] = {
-        0.0f,
-        0.0f,
-        0.0f,
-      };
-
-      if (trajectoryLocalOffsetInitialized) {
-        const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
-        velocityCmdWorld[1] = (trajectoryLocalOffset.y - trajectoryLocalOffsetPrev.y) / dt;
-        velocityCmdWorld[2] = (trajectoryLocalOffset.z - trajectoryLocalOffsetPrev.z) / dt;
-      }
-      trajectoryLocalOffsetPrev = trajectoryLocalOffset;
-      trajectoryLocalOffsetInitialized = true;
-
+      updateVelocityModulationNormalDot();
+      updateCurvatureEstimate();
+      applyVelocityModulation(velocityCmdWorld);
       applyTangentialVelocityControl(velocityCmdWorld);
       if (isPreloadVelocityControlActive(positionMode, forceDesired)) {
         applyPreloadVelocityControl(velocityCmdWorld, state, forceDesired);
       }
-
-      referencePosition.x += velocityCmdWorld[0] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
-      referencePosition.y += velocityCmdWorld[1] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
-      referencePosition.z += velocityCmdWorld[2] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
-      referenceBaseYawDeg = wrapAngleDeg180(trajectoryYawDeg);
     }
-    if (RATE_DO_EXECUTE(SU_POSITION_VELOCITY_RATE_HZ, stabilizerStep)) {
+
+    referencePosition.x += velocityCmdWorld[0] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
+    referencePosition.y += velocityCmdWorld[1] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
+    referencePosition.z += velocityCmdWorld[2] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
+
+    if (advancedVelocityControlEnabled) {
       updateYawFromMobForce();
+    } else {
+      referenceYawCorrectionDeg = 0.0f;
     }
   }
 
   writeReferenceToSetpoint(setpoint, commandReference);
 
   lastPositionMode = positionMode;
-  lastTrajectoryMode = trajectoryMode;
   lastCommandReference = commandReference;
 }
 
@@ -694,6 +807,9 @@ LOG_ADD(LOG_FLOAT, nPostZ, &normalProjectedCandidateWorld[2])
 LOG_ADD(LOG_FLOAT, nEstX, &normalEstimateWorld[0])
 LOG_ADD(LOG_FLOAT, nEstY, &normalEstimateWorld[1])
 LOG_ADD(LOG_FLOAT, nEstZ, &normalEstimateWorld[2])
+LOG_ADD(LOG_FLOAT, nDotX, &normalEstimateDotWorld[0])
+LOG_ADD(LOG_FLOAT, nDotY, &normalEstimateDotWorld[1])
+LOG_ADD(LOG_FLOAT, nDotZ, &normalEstimateDotWorld[2])
 LOG_ADD(LOG_FLOAT, vEeX, &filteredContactVelWorld[0])
 LOG_ADD(LOG_FLOAT, vEeY, &filteredContactVelWorld[1])
 LOG_ADD(LOG_FLOAT, vEeZ, &filteredContactVelWorld[2])
@@ -703,3 +819,14 @@ LOG_ADD(LOG_FLOAT, eeCmdY, &eeReferenceLog.y)
 LOG_ADD(LOG_FLOAT, eeCmdZ, &eeReferenceLog.z)
 LOG_ADD(LOG_FLOAT, eeCmdYaw, &referenceYawDegLog)
 LOG_GROUP_STOP(suPosRef)
+
+LOG_GROUP_START(suVelMod)
+LOG_ADD(LOG_FLOAT, nHatDotX, &velocityModulationNormalDotWorld[0])
+LOG_ADD(LOG_FLOAT, nHatDotY, &velocityModulationNormalDotWorld[1])
+LOG_ADD(LOG_FLOAT, nHatDotZ, &velocityModulationNormalDotWorld[2])
+LOG_ADD(LOG_FLOAT, kappaHat, &curvatureEstimate)
+LOG_ADD(LOG_FLOAT, alphaStar, &velocityModulationAlpha)
+LOG_ADD(LOG_FLOAT, vcX, &filteredContactVelWorld[0])
+LOG_ADD(LOG_FLOAT, vcY, &filteredContactVelWorld[1])
+LOG_ADD(LOG_FLOAT, vcZ, &filteredContactVelWorld[2])
+LOG_GROUP_STOP(suVelMod)
