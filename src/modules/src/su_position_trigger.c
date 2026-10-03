@@ -28,10 +28,12 @@ typedef struct __attribute__((packed)) {
 
 typedef enum {
   SU_CALIB_IDLE = 0,
-  SU_CALIB_IMU_TRIM = 1,
-  SU_CALIB_COM_COLLECT = 2,
-  SU_CALIB_DONE = 3,
-  SU_CALIB_ERROR = 4,
+  // State value 1 was the removed WAIT_HOVER state. Keep the remaining wire
+  // values stable so older ROS clients and logs decode calibration correctly.
+  SU_CALIB_IMU_TRIM = 2,
+  SU_CALIB_COM_COLLECT = 3,
+  SU_CALIB_DONE = 4,
+  SU_CALIB_ERROR = 5,
 } su_calib_state_t;
 
 // Hardware-tunable calibration constants.

@@ -311,10 +311,14 @@ void suWrenchObserverUpdate(const state_t *state,
   su_lin_momentum_world[1] = sanitizeFinite(su_mass * su_vel_used_world[1]);
   su_lin_momentum_world[2] = sanitizeFinite(su_mass * su_vel_used_world[2]);
 
+  float mobStiffnessGain;
+  float mobDampingGain;
+  suGetMobLpfGains(&mobStiffnessGain, &mobDampingGain);
+
   vec3Sub(su_rot_momentum_err_body, su_rot_momentum_body, su_rot_momentum_hat_body);
 
   float torque_l_hat_dot_body[3];
-  vec3Scale(torque_l_hat_dot_body, su_rot_momentum_err_body, su_Ktau);
+  vec3Scale(torque_l_hat_dot_body, su_rot_momentum_err_body, mobStiffnessGain);
   vec3ScaleAdd(su_torque_l_hat_body, su_torque_l_hat_body, dt, torque_l_hat_dot_body);
   sanitizeVec3(su_torque_l_hat_body);
 
@@ -324,7 +328,7 @@ void suWrenchObserverUpdate(const state_t *state,
   float rot_momentum_hat_dot[3];
   for (int i = 0; i < 3; ++i) {
     rot_momentum_hat_dot[i] = su_body_torque_nm[i] - omega_cross_h[i] + su_torque_l_hat_body[i] +
-                              su_Kh * su_rot_momentum_err_body[i];
+                              mobDampingGain * su_rot_momentum_err_body[i];
   }
 
   vec3ScaleAdd(su_rot_momentum_hat_body, su_rot_momentum_hat_body, dt, rot_momentum_hat_dot);
@@ -338,14 +342,14 @@ void suWrenchObserverUpdate(const state_t *state,
   float lin_momentum_hat_dot[3];
   for (int i = 0; i < 3; ++i) {
     lin_momentum_hat_dot[i] = gravity_world[i] + su_world_force_n[i] + su_force_l_hat_world[i] +
-                              su_Kh * su_lin_momentum_err_world[i];
+                              mobDampingGain * su_lin_momentum_err_world[i];
   }
 
   vec3ScaleAdd(su_lin_momentum_hat_world, su_lin_momentum_hat_world, dt, lin_momentum_hat_dot);
   sanitizeVec3(su_lin_momentum_hat_world);
 
   float force_l_hat_dot_world[3];
-  vec3Scale(force_l_hat_dot_world, su_lin_momentum_err_world, su_Ktau);
+  vec3Scale(force_l_hat_dot_world, su_lin_momentum_err_world, mobStiffnessGain);
   vec3ScaleAdd(su_force_l_hat_world, su_force_l_hat_world, dt, force_l_hat_dot_world);
   sanitizeVec3(su_force_l_hat_world);
 

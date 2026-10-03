@@ -10,8 +10,8 @@
  *
  * Units:
  *  - mass:            [kg]
- *  - Ktau:            [1/s] in MOB, [1/s^2] in matched-filter dynamics
- *  - Kh:              [1/s]
+ *  - mob LPF:         [Hz], shared natural frequency for critically damped
+ *                     force/torque MOB and thrust-effectiveness matched filters
  */
 
 #ifdef __cplusplus
@@ -24,8 +24,8 @@ extern "C" {
 extern float su_mass;             // [kg]
 
 // -------- Wrench observer / MOB --------
-extern float su_Ktau;             // Shared MOB estimate / matched-filter stiffness gain
-extern float su_Kh;               // [1/s] shared MOB / matched-filter damping gain
+extern float su_mob_lpf_hz;       // [Hz] shared critically damped MOB/matched-filter frequency
+void suGetMobLpfGains(float *stiffness_gain, float *damping_gain);
 
 extern float su_com_offset_x;     // [m] body-frame CoM offset x
 extern float su_com_offset_y;     // [m] body-frame CoM offset y

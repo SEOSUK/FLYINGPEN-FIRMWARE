@@ -2,14 +2,15 @@
 #include "param.h"
 #include "su_params.h"
 
+#include <math.h>
+
 // ========= 전역 공유 파라미터 정의 (단일 소스) =========
 // 플랫폼/모델
 float su_mass            = CF_MASS;      // [kg] 원래는 0.0393
 
 
 // Wrench observer / MOB 관련
-float su_Ktau            = 88.8264f;     // wn^2, wn = 3*pi rad/s
-float su_Kh              = 18.8496f;     // 2*wn (critical damping), wn = 3*pi rad/s
+float su_mob_lpf_hz      = 1.5f;         // [Hz], wn=2*pi*f; shared critical damping
 float su_com_offset_x    = 0.0f;         // [m] body-frame CoM offset x
 float su_com_offset_y    = 0.0f;         // [m] body-frame CoM offset y
 float su_com_offset_z    = 0.0f;         // [m] body-frame CoM offset z
@@ -42,6 +43,7 @@ float su_nu_n_bar         = 0.08f;       // [m/s] symmetric saturation of normal
 // // Wrench/MOB 파라미터: 기존 su_wrench 그룹명 유지(로그/툴 호환성)
 PARAM_GROUP_START(su_wrench)
 PARAM_ADD(PARAM_FLOAT, mass,            &su_mass)
+PARAM_ADD(PARAM_FLOAT, mobLPF,          &su_mob_lpf_hz)
 PARAM_ADD(PARAM_FLOAT, comOffX,         &su_com_offset_x)
 PARAM_ADD(PARAM_FLOAT, comOffY,         &su_com_offset_y)
 PARAM_ADD(PARAM_FLOAT, comOffZ,         &su_com_offset_z)
@@ -49,6 +51,19 @@ PARAM_ADD(PARAM_FLOAT, rOffX,           &su_r_offset_x)
 PARAM_ADD(PARAM_FLOAT, rOffY,           &su_r_offset_y)
 PARAM_ADD(PARAM_FLOAT, rOffZ,           &su_r_offset_z)
 PARAM_GROUP_STOP(su_wrench)
+
+void suGetMobLpfGains(float *stiffness_gain, float *damping_gain)
+{
+  const float cutoff_hz = (isfinite(su_mob_lpf_hz) && su_mob_lpf_hz > 0.0f) ?
+    su_mob_lpf_hz : 0.0f;
+  const float omega_n = 2.0f * (float)M_PI * cutoff_hz;
+  if (stiffness_gain) {
+    *stiffness_gain = omega_n * omega_n;
+  }
+  if (damping_gain) {
+    *damping_gain = 2.0f * omega_n;
+  }
+}
 
 PARAM_GROUP_START(su_position)
 PARAM_ADD(PARAM_UINT8, preloadEn,       &su_normal_estimation)

@@ -173,12 +173,16 @@ void suThrustEffectivenessUpdate(const state_t *state,
   sanitizeVec3(forceLHatWorld);
   sanitizeVec3(torqueLHatWorld);
 
+  float mobStiffnessGain;
+  float mobDampingGain;
+  suGetMobLpfGains(&mobStiffnessGain, &mobDampingGain);
+
   updateMatchedSignal(su_matched_force_signal_world, su_matched_force_dot_world,
                       su_matched_force_output_world, nominalForceWorld, dt,
-                      su_Ktau, su_Kh);
+                      mobStiffnessGain, mobDampingGain);
   updateMatchedSignal(su_matched_torque_signal_world, su_matched_torque_dot_world,
                       su_matched_torque_output_world, nominalTorqueWorld, dt,
-                      su_Ktau, su_Kh);
+                      mobStiffnessGain, mobDampingGain);
   vec3Copy(su_nominal_force_world, su_matched_force_output_world);
 
   float yEta[3];
