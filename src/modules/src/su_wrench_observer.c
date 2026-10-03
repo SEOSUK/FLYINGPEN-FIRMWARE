@@ -473,6 +473,9 @@ LOG_ADD(LOG_FLOAT, tauLWz, &su_torque_l_hat_world[2])  // N*m, raw lumped torque
 LOG_ADD(LOG_FLOAT, fHatWx, &su_force_l_hat_world[0])   // N, raw lumped force in world frame
 LOG_ADD(LOG_FLOAT, fHatWy, &su_force_l_hat_world[1])   // N, raw lumped force in world frame
 LOG_ADD(LOG_FLOAT, fHatWz, &su_force_l_hat_world[2])   // N, raw lumped force in world frame
+LOG_ADD(LOG_FLOAT, fInWx, &su_world_force_n[0])        // N, force input used by the linear observer, world frame
+LOG_ADD(LOG_FLOAT, fInWy, &su_world_force_n[1])        // N, force input used by the linear observer, world frame
+LOG_ADD(LOG_FLOAT, fInWz, &su_world_force_n[2])        // N, force input used by the linear observer, world frame
 // LOG_ADD(LOG_FLOAT, fHatBx, &su_force_l_hat_body[0])    // N, estimated lumped force in body frame
 // LOG_ADD(LOG_FLOAT, fHatBy, &su_force_l_hat_body[1])    // N, estimated lumped force in body frame
 // LOG_ADD(LOG_FLOAT, fHatBz, &su_force_l_hat_body[2])    // N, estimated lumped force in body frame

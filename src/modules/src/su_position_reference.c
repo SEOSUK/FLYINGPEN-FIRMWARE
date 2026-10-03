@@ -17,6 +17,8 @@
 static bool referenceInitialized = false;
 static point_t referencePosition;
 static point_t eeReferenceLog;
+static point_t eeMeasuredLog;
+static float forceDesiredLog = 0.0f;
 static float referenceBaseYawDeg = 0.0f;
 static float referenceYawCorrectionDeg = 0.0f;
 static uint8_t lastPositionMode = SU_POSITION_MODE_POSITION;
@@ -718,6 +720,10 @@ void suPositionReferenceInit(void)
   eeReferenceLog.x = 0.0f;
   eeReferenceLog.y = 0.0f;
   eeReferenceLog.z = 0.0f;
+  eeMeasuredLog.x = 0.0f;
+  eeMeasuredLog.y = 0.0f;
+  eeMeasuredLog.z = 0.0f;
+  forceDesiredLog = 0.0f;
   referenceBaseYawDeg = 0.0f;
   referenceYawCorrectionDeg = 0.0f;
   referenceYawDegLog = 0.0f;
@@ -745,6 +751,14 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
   const uint8_t positionMode = suPositionTriggerGetMode();
   const uint8_t commandReference = suPositionTriggerGetCommandReference();
   const float forceDesired = suPositionTriggerGetForceDesired();
+  forceDesiredLog = forceDesired;
+  if (state) {
+    float contactOffsetWorld[3] = {0.0f, 0.0f, 0.0f};
+    suWrenchObserverGetContactOffsetWorld(contactOffsetWorld);
+    eeMeasuredLog.x = state->position.x + contactOffsetWorld[0];
+    eeMeasuredLog.y = state->position.y + contactOffsetWorld[1];
+    eeMeasuredLog.z = state->position.z + contactOffsetWorld[2];
+  }
   const bool advancedVelocityControlEnabled = isAdvancedVelocityControlMode(positionMode);
   const float currentReferenceYawDeg = getReferenceYawDeg();
   if (commandReference != lastCommandReference) {
@@ -818,6 +832,10 @@ LOG_ADD(LOG_FLOAT, eeCmdX, &eeReferenceLog.x)
 LOG_ADD(LOG_FLOAT, eeCmdY, &eeReferenceLog.y)
 LOG_ADD(LOG_FLOAT, eeCmdZ, &eeReferenceLog.z)
 LOG_ADD(LOG_FLOAT, eeCmdYaw, &referenceYawDegLog)
+LOG_ADD(LOG_FLOAT, eePosX, &eeMeasuredLog.x)
+LOG_ADD(LOG_FLOAT, eePosY, &eeMeasuredLog.y)
+LOG_ADD(LOG_FLOAT, eePosZ, &eeMeasuredLog.z)
+LOG_ADD(LOG_FLOAT, forceCmd, &forceDesiredLog)
 LOG_GROUP_STOP(suPosRef)
 
 LOG_GROUP_START(suVelMod)

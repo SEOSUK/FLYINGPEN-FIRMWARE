@@ -51,8 +51,6 @@ extern float su_velocity_modulation_kappa_lpf_hz; // [Hz] curvature LPF cutoff; 
 extern float su_g_nf;             // [m/(s*N)] gain from normal force tracking error
 extern float su_g_nv;             // [-] gain from normal velocity leakage
 extern float su_nu_n_bar;         // [m/s] symmetric saturation limit for normal velocity command
-extern float su_epsilon_f_min;    // [N] lower threshold where force-aligned yaw smoothing starts
-extern float su_epsilon_f_max;    // [N] upper threshold where force-aligned yaw reaches full weight
 
 #ifdef __cplusplus
 } // extern "C"
