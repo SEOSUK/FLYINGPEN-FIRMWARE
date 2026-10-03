@@ -73,6 +73,13 @@ typedef enum
 // Set up the callback for the CRTP_PORT_LOCALIZATION
 void locSrvInit(void);
 
+/**
+ * Get a coherent snapshot of the latest external-position sample.
+ * The monotonically increasing sample count changes once per received sample.
+ * Returns false until the first sample has arrived.
+ */
+bool locSrvGetExternalPositionSample(uint32_t* sampleCount, float position[3]);
+
 // Send range in float. After 5 ranges it will send the packet.
 void locSrvSendRangeFloat(uint8_t id, float range);
 #ifdef CONFIG_DECK_LIGHTHOUSE

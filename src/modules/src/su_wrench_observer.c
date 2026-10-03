@@ -26,6 +26,7 @@ static float su_state_vel_world[3];
 static float su_vel_from_pos_world[3];
 static float su_state_acc_world_mps2[3];
 static float su_vel_used_world[3];
+static float su_contact_offset_vel_world[3];
 static float su_contact_point_vel_world[3];
 
 static float su_gyro_body_rad_s[3];
@@ -165,6 +166,7 @@ void suWrenchObserverInit(void)
     su_vel_from_pos_world[i] = 0.0f;
     su_state_acc_world_mps2[i] = 0.0f;
     su_vel_used_world[i] = 0.0f;
+    su_contact_offset_vel_world[i] = 0.0f;
     su_contact_point_vel_world[i] = 0.0f;
     su_gyro_body_rad_s[i] = 0.0f;
     su_r_offset_body_m[i] = 0.0f;
@@ -295,10 +297,10 @@ void suWrenchObserverUpdate(const state_t *state,
   sanitizeVec3(su_r_offset_world_m);
 
   float omega_cross_r_body[3];
-  float contact_offset_vel_world[3];
   vec3Cross(omega_cross_r_body, su_gyro_body_rad_s, su_r_offset_body_m);
-  mat3MulVec(contact_offset_vel_world, R, omega_cross_r_body);
-  vec3Add(su_contact_point_vel_world, su_vel_used_world, contact_offset_vel_world);
+  mat3MulVec(su_contact_offset_vel_world, R, omega_cross_r_body);
+  sanitizeVec3(su_contact_offset_vel_world);
+  vec3Add(su_contact_point_vel_world, su_vel_used_world, su_contact_offset_vel_world);
   sanitizeVec3(su_contact_point_vel_world);
 
   su_rot_momentum_body[0] = sanitizeFinite(SU_OBSERVER_JXX * su_gyro_body_rad_s[0]);
@@ -496,6 +498,10 @@ LOG_ADD(LOG_FLOAT, stateVz, &su_state_vel_world[2])     // m/s, world frame stat
 LOG_ADD(LOG_FLOAT, posVx, &su_vel_from_pos_world[0])    // m/s, world frame velocity from su_vel_from_pos
 LOG_ADD(LOG_FLOAT, posVy, &su_vel_from_pos_world[1])    // m/s, world frame velocity from su_vel_from_pos
 LOG_ADD(LOG_FLOAT, posVz, &su_vel_from_pos_world[2])    // m/s, world frame velocity from su_vel_from_pos
+
+LOG_ADD(LOG_FLOAT, rotVelX, &su_contact_offset_vel_world[0]) // m/s, world-frame R * (omega x r), x
+LOG_ADD(LOG_FLOAT, rotVelY, &su_contact_offset_vel_world[1]) // m/s, world-frame R * (omega x r), y
+LOG_ADD(LOG_FLOAT, rotVelZ, &su_contact_offset_vel_world[2]) // m/s, world-frame R * (omega x r), z
 
 LOG_ADD(LOG_FLOAT, accWx, &su_state_acc_world_mps2[0])  // m/s^2, world frame state.acc
 LOG_ADD(LOG_FLOAT, accWy, &su_state_acc_world_mps2[1])  // m/s^2, world frame state.acc

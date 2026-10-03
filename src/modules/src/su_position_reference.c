@@ -12,7 +12,7 @@
 #define SU_POSITION_VELOCITY_RATE_HZ 100
 #define SU_RAD2DEG (180.0f / (float)M_PI)
 #define SU_YAW_ALIGN_SAT_DEG 70.0f
-#define SU_NORMAL_VELOCITY_LEAKAGE_LPF_HZ 0.4f
+#define SU_NORMAL_VELOCITY_LEAKAGE_LPF_HZ 2.0f
 
 static bool referenceInitialized = false;
 static point_t referencePosition;
@@ -826,6 +826,9 @@ LOG_ADD(LOG_FLOAT, nHatDotY, &velocityModulationNormalDotWorld[1])
 LOG_ADD(LOG_FLOAT, nHatDotZ, &velocityModulationNormalDotWorld[2])
 LOG_ADD(LOG_FLOAT, kappaHat, &curvatureEstimate)
 LOG_ADD(LOG_FLOAT, alphaStar, &velocityModulationAlpha)
+LOG_ADD(LOG_FLOAT, vcRawX, &contactVelRawWorld[0])
+LOG_ADD(LOG_FLOAT, vcRawY, &contactVelRawWorld[1])
+LOG_ADD(LOG_FLOAT, vcRawZ, &contactVelRawWorld[2])
 LOG_ADD(LOG_FLOAT, vcX, &filteredContactVelWorld[0])
 LOG_ADD(LOG_FLOAT, vcY, &filteredContactVelWorld[1])
 LOG_ADD(LOG_FLOAT, vcZ, &filteredContactVelWorld[2])

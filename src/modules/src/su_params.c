@@ -24,7 +24,9 @@ float su_normal_epsilon_f = 0.01f;       // [N] minimum force evidence norm
 uint8_t su_velocity_modulation_enable = 1;
 float su_velocity_modulation_a_bar_n = 0.013f; // [m/s^2] normal acceleration bound
 float su_velocity_modulation_v_min = 0.01f;    // [m/s] minimum contact speed for curvature update
-float su_contact_velocity_lpf_hz = 0.4f;       // [Hz] shared contact-velocity LPF cutoff; <= 0 bypasses LPF
+float su_contact_velocity_lpf_hz = 2.0f;       // [Hz] shared contact-velocity LPF cutoff; <= 0 bypasses LPF
+float su_velocity_accel_xy_max = 5.0f;         // [m/s^2] numerical velocity XY acceleration gate
+float su_velocity_accel_z_max = 8.0f;          // [m/s^2] numerical velocity Z acceleration gate
 float su_velocity_modulation_n_dot_lpf_hz = 3.0f; // [Hz] normal-derivative LPF cutoff; <= 0 bypasses LPF
 float su_velocity_modulation_kappa_lpf_hz = 1.0f; // [Hz] curvature LPF cutoff; <= 0 bypasses LPF
 float su_g_nf             = 1.0f;        // normal force tracking gain
@@ -60,6 +62,8 @@ PARAM_ADD(PARAM_UINT8, velModEn,        &su_velocity_modulation_enable)
 PARAM_ADD(PARAM_FLOAT, velModABar,      &su_velocity_modulation_a_bar_n)
 PARAM_ADD(PARAM_FLOAT, velModVMin,      &su_velocity_modulation_v_min)
 PARAM_ADD(PARAM_FLOAT, contactVelLPF,    &su_contact_velocity_lpf_hz)
+PARAM_ADD(PARAM_FLOAT, velAccXY,         &su_velocity_accel_xy_max)
+PARAM_ADD(PARAM_FLOAT, velAccZ,          &su_velocity_accel_z_max)
 PARAM_ADD(PARAM_FLOAT, velModNDotLPF,   &su_velocity_modulation_n_dot_lpf_hz)
 PARAM_ADD(PARAM_FLOAT, velModKLPF,      &su_velocity_modulation_kappa_lpf_hz)
 PARAM_ADD(PARAM_FLOAT, preloadGf,       &su_g_nf)

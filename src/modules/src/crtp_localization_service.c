@@ -151,6 +151,48 @@ static float extQuatStdDev = 4.5e-3;
 static bool isInit = false;
 static uint8_t my_id;
 static uint16_t tickOfLastPacket; // tick when last packet was received
+#define EXT_POS_GAP_THRESHOLD_MS 25U
+static uint32_t extPosRxCount = 0;
+static uint16_t extPosRxDtMs = 0;
+static uint16_t extPosRxDtMaxMs = 0;
+static uint32_t extPosGapCount = 0;
+static uint16_t extPosGapLastMs = 0;
+static uint32_t extPosLastRxTick = 0;
+
+static void recordExternalPositionReception(void)
+{
+  const uint32_t nowTick = xTaskGetTickCount();
+  if (extPosRxCount > 0) {
+    const uint32_t dtMs32 = T2M(nowTick - extPosLastRxTick);
+    extPosRxDtMs = dtMs32 > UINT16_MAX ? UINT16_MAX : (uint16_t)dtMs32;
+    if (extPosRxDtMs > extPosRxDtMaxMs) {
+      extPosRxDtMaxMs = extPosRxDtMs;
+    }
+    if (dtMs32 > EXT_POS_GAP_THRESHOLD_MS) {
+      extPosGapCount++;
+      extPosGapLastMs = extPosRxDtMs;
+    }
+  }
+  extPosLastRxTick = nowTick;
+  extPosRxCount++;
+  tickOfLastPacket = nowTick;
+}
+
+bool locSrvGetExternalPositionSample(uint32_t* sampleCount, float position[3])
+{
+  if (!sampleCount || !position) {
+    return false;
+  }
+
+  taskENTER_CRITICAL();
+  *sampleCount = extPosRxCount;
+  position[0] = ext_pose.x;
+  position[1] = ext_pose.y;
+  position[2] = ext_pose.z;
+  taskEXIT_CRITICAL();
+
+  return *sampleCount != 0;
+}
 
 static void locSrvCrtpCB(CRTPPacket* pk);
 static void extPositionHandler(CRTPPacket* pk);
@@ -211,7 +253,7 @@ static void extPositionHandler(CRTPPacket* pk) {
   updateLogFromExtPos();
 
   estimatorEnqueuePosition(&ext_pos);
-  tickOfLastPacket = xTaskGetTickCount();
+  recordExternalPositionReception();
 }
 
 static void extPoseHandler(const CRTPPacket* pk) {
@@ -228,7 +270,7 @@ static void extPoseHandler(const CRTPPacket* pk) {
   ext_pose.stdDevQuat = extQuatStdDev;
 
   estimatorEnqueuePose(&ext_pose);
-  tickOfLastPacket = xTaskGetTickCount();
+  recordExternalPositionReception();
 }
 
 static void extPosePackedHandler(const CRTPPacket* pk) {
@@ -243,7 +285,7 @@ static void extPosePackedHandler(const CRTPPacket* pk) {
       ext_pose.stdDevPos = extPosStdDev;
       ext_pose.stdDevQuat = extQuatStdDev;
       estimatorEnqueuePose(&ext_pose);
-      tickOfLastPacket = xTaskGetTickCount();
+      recordExternalPositionReception();
     } else {
       ext_pos.x = item->x / 1000.0f;
       ext_pos.y = item->y / 1000.0f;
@@ -359,7 +401,7 @@ static void extPositionPackedHandler(CRTPPacket* pk)
     if (item->id == my_id) {
       updateLogFromExtPos();
       estimatorEnqueuePosition(&ext_pos);
-      tickOfLastPacket = xTaskGetTickCount();
+      recordExternalPositionReception();
     }
     else {
       peerLocalizationTellPosition(item->id, &ext_pos);
@@ -553,6 +595,11 @@ LOG_GROUP_START(locSrv)
  * @brief Quaternion w meas from an external system
  */
   LOG_ADD_CORE(LOG_FLOAT, qw, &ext_pose.quat.w)
+  LOG_ADD(LOG_UINT16, rxDtMs, &extPosRxDtMs)
+  LOG_ADD(LOG_UINT32, rxCount, &extPosRxCount)
+  LOG_ADD(LOG_UINT32, gapCount, &extPosGapCount)
+  LOG_ADD(LOG_UINT16, gapLastMs, &extPosGapLastMs)
+  LOG_ADD(LOG_UINT16, rxDtMaxMs, &extPosRxDtMaxMs)
 LOG_GROUP_STOP(locSrv)
 
 /**

@@ -70,6 +70,8 @@ static bool isInit;
 #define SU_WRENCH_RATE_HZ 100
 #endif
 
+#define SU_VEL_FROM_POS_RATE_HZ 100
+
 
 static uint32_t inToOutLatency;
 
@@ -95,6 +97,8 @@ static bool rateWarningDisplayed = false;
 SemaphoreHandle_t xRateSupervisorSemaphore;
 static uint32_t stabilizerLoopElapsedUs = 0;
 static uint32_t stabilizerLoopElapsedUsMax = 0;
+#define STABILIZER_LOOP_OVERRUN_THRESHOLD_US 1000U
+static uint32_t stabilizerLoopOverrunCount = 0;
 
 static struct {
   // position - mm
@@ -345,8 +349,15 @@ static void stabilizerTask(void* param)
 
       stateEstimator(&state, stabilizerStep);
 
-    const float dt_main = 1.0f / 1000.0f;
-    suVelFromPosUpdate(&state, dt_main);
+      // Consume at most one latest external-position sample per 100 Hz tick.
+      // v_raw is held without a new sample; its 10 Hz LPF always keeps running.
+      if (RATE_DO_EXECUTE(SU_VEL_FROM_POS_RATE_HZ, stabilizerStep)) {
+        uint32_t positionSampleCount = 0;
+        float externalPosition[3] = {0.0f, 0.0f, 0.0f};
+        locSrvGetExternalPositionSample(&positionSampleCount, externalPosition);
+        suVelFromPosUpdate(externalPosition, positionSampleCount,
+                           1.0f / (float)SU_VEL_FROM_POS_RATE_HZ);
+      }
           
       const bool areMotorsAllowedToRun = supervisorAreMotorsAllowedToRun();
 
@@ -421,6 +432,9 @@ static void stabilizerTask(void* param)
     stabilizerLoopElapsedUs = usecTimestamp() - loopStartUs;
     if (stabilizerLoopElapsedUs > stabilizerLoopElapsedUsMax) {
       stabilizerLoopElapsedUsMax = stabilizerLoopElapsedUs;
+    }
+    if (stabilizerLoopElapsedUs > STABILIZER_LOOP_OVERRUN_THRESHOLD_US) {
+      stabilizerLoopOverrunCount++;
     }
 
     xSemaphoreGive(xRateSupervisorSemaphore);
@@ -615,6 +629,8 @@ LOG_ADD(LOG_UINT32, loopDtUs, &stabilizerLoopElapsedUs)
  * @brief Maximum observed stabilizer loop elapsed runtime since boot [us]
  */
 LOG_ADD(LOG_UINT32, loopDtUsMax, &stabilizerLoopElapsedUsMax)
+/** @brief Number of loop runtimes exceeding 1000 us since boot */
+LOG_ADD(LOG_UINT32, loopOvrCnt, &stabilizerLoopOverrunCount)
 LOG_GROUP_STOP(stabilizer)
 
 /**

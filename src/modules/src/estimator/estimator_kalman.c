@@ -175,6 +175,9 @@ static float compPitchBiasParam = 0.0f;  // [rad], output-only pitch bias for mi
 
 // Indicates that the internal state is corrupt and should be reset
 bool resetEstimation = false;
+static uint32_t kalmanResetCount = 0;
+static uint32_t kalmanSupervisorResetCount = 0;
+static uint32_t kalmanStateUpdateCount = 0;
 
 static kalmanCoreParams_t coreParams = {
   KALMAN_CORE_DEFAULT_PARAMS_INIT
@@ -261,6 +264,7 @@ static void kalmanTask(void* parameters) {
 
     if (resetEstimation) {
       estimatorKalmanInit();
+      kalmanResetCount++;
       resetEstimation = false;
     }
 
@@ -301,6 +305,7 @@ static void kalmanTask(void* parameters) {
 
     if (! kalmanSupervisorIsStateWithinBounds(&coreData)) {
       resetEstimation = true;
+      kalmanSupervisorResetCount++;
 
       if (nowMs > warningBlockTimeMs) {
         warningBlockTimeMs = nowMs + WARNING_HOLD_BACK_TIME_MS;
@@ -314,6 +319,7 @@ static void kalmanTask(void* parameters) {
      */
     xSemaphoreTake(dataMutex, portMAX_DELAY);
     kalmanCoreExternalizeState(&coreData, &taskEstimatorState, &accLatest);
+    kalmanStateUpdateCount++;
     xSemaphoreGive(dataMutex);
 
     STATS_CNT_RATE_EVENT(&updateCounter);
@@ -597,6 +603,9 @@ LOG_GROUP_START(kalman)
   * @brief Statistics rate full estimation step
   */
   STATS_CNT_RATE_LOG_ADD(rtFinal, &finalizeCounter)
+LOG_ADD(LOG_UINT32, resetCnt, &kalmanResetCount)
+LOG_ADD(LOG_UINT32, supResetCnt, &kalmanSupervisorResetCount)
+LOG_ADD(LOG_UINT32, stateUpdCnt, &kalmanStateUpdateCount)
 LOG_ADD(LOG_FLOAT, accX_ext, &taskEstimatorState.acc.x)
 LOG_ADD(LOG_FLOAT, accY_ext, &taskEstimatorState.acc.y)
 LOG_ADD(LOG_FLOAT, accZ_ext, &taskEstimatorState.acc.z)

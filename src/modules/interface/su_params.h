@@ -44,6 +44,8 @@ extern uint8_t su_velocity_modulation_enable; // 0: disabled, 1: enabled
 extern float su_velocity_modulation_a_bar_n;  // [m/s^2] normal acceleration bound
 extern float su_velocity_modulation_v_min;    // [m/s] minimum contact speed for curvature update
 extern float su_contact_velocity_lpf_hz;      // [Hz] shared contact-velocity LPF cutoff; <= 0 bypasses LPF
+extern float su_velocity_accel_xy_max;        // [m/s^2] numerical velocity XY acceleration gate
+extern float su_velocity_accel_z_max;         // [m/s^2] numerical velocity Z acceleration gate
 extern float su_velocity_modulation_n_dot_lpf_hz; // [Hz] normal-derivative LPF cutoff; <= 0 bypasses LPF
 extern float su_velocity_modulation_kappa_lpf_hz; // [Hz] curvature LPF cutoff; <= 0 bypasses LPF
 extern float su_g_nf;             // [m/(s*N)] gain from normal force tracking error
