@@ -23,6 +23,8 @@ void suWrenchObserverGetWorldInputTorque(float outTau[3]);
 void suWrenchObserverGetContactOffsetWorld(float outR[3]);
 void suWrenchObserverGetStateVelocityWorld(float outV[3]);
 void suWrenchObserverGetContactPointVelocityWorld(float outV[3]);
+void suWrenchObserverGetMotorThrust(float outThrust[4]);
+void suWrenchObserverGetBodyInputTorque(float outTau[3]);
 
 #ifdef __cplusplus
 }

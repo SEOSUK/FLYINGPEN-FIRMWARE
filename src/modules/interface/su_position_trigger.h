@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "sensors.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,6 +19,7 @@ typedef enum {
 
 void suPositionTriggerInit(void);
 void suPositionTriggerUpdate(void);
+void suPositionTriggerCalibrationUpdate(const Axis3f *postTrimAcc, float dt);
 
 uint8_t suPositionTriggerGetMode(void);
 uint8_t suPositionTriggerGetCommandReference(void);

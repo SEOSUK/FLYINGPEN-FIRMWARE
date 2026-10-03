@@ -60,6 +60,7 @@
 #include "su_wrench_observer.h" // SEUK
 #include "su_thrust_effectiveness.h"
 #include "su_position_reference.h"
+#include "su_position_trigger.h"
 #include "su_vel_from_pos.h"
 
 static bool isInit;
@@ -408,6 +409,7 @@ static void stabilizerTask(void* param)
 
         suWrenchObserverUpdate(&state, &motorPwm, &sensorData.gyro,
                                velFromPosWorld, 1.0f / (float)SU_WRENCH_RATE_HZ);
+        suPositionTriggerCalibrationUpdate(&sensorData.acc, 1.0f / (float)SU_WRENCH_RATE_HZ);
         suThrustEffectivenessUpdate(&state, &motorThrustBatCompUncapped, &sensorData.gyro,
                                    velFromPosWorld, 1.0f / (float)SU_WRENCH_RATE_HZ);
       }      // Compute compressed log formats      

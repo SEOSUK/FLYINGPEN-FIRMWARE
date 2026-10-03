@@ -430,6 +430,26 @@ void suWrenchObserverGetContactPointVelocityWorld(float outV[3])
   outV[2] = su_contact_point_vel_world[2];
 }
 
+void suWrenchObserverGetMotorThrust(float outThrust[4])
+{
+  if (!outThrust) {
+    return;
+  }
+  for (int i = 0; i < 4; ++i) {
+    outThrust[i] = su_motor_thrust_n[i];
+  }
+}
+
+void suWrenchObserverGetBodyInputTorque(float outTau[3])
+{
+  if (!outTau) {
+    return;
+  }
+  for (int i = 0; i < 3; ++i) {
+    outTau[i] = su_body_torque_nm[i];
+  }
+}
+
 LOG_GROUP_START(suWrenchObs)
 // Fill momentum observer values //
 // LOG_ADD(LOG_FLOAT, omgX, &su_gyro_body_rad_s[0])       // rad/s, body angular velocity
