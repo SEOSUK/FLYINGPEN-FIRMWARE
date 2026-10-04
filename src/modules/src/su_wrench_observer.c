@@ -14,6 +14,7 @@
 #define SU_OBSERVER_JXX         2.3951e-5f
 #define SU_OBSERVER_JYY         2.3951e-5f
 #define SU_OBSERVER_JZZ         3.2347e-5f
+#define SU_MOTOR_THRUST_SCALE   1.1f
 
 static float su_motor_thrust_n[4];
 static uint16_t su_motor_pwm_ratio[4];
@@ -198,10 +199,10 @@ void suWrenchObserverUpdate(const state_t *state,
   const float thrust_to_n = THRUST_MAX / (float)UINT16_MAX;
   const float gravity_world[3] = {0.0f, 0.0f, -su_mass * 9.81f};
 
-  const float f1 = thrust_to_n * (float)motorPwm->motors.m1;
-  const float f2 = thrust_to_n * (float)motorPwm->motors.m2;
-  const float f3 = thrust_to_n * (float)motorPwm->motors.m3;
-  const float f4 = thrust_to_n * (float)motorPwm->motors.m4;
+  const float f1 = SU_MOTOR_THRUST_SCALE * thrust_to_n * (float)motorPwm->motors.m1;
+  const float f2 = SU_MOTOR_THRUST_SCALE * thrust_to_n * (float)motorPwm->motors.m2;
+  const float f3 = SU_MOTOR_THRUST_SCALE * thrust_to_n * (float)motorPwm->motors.m3;
+  const float f4 = SU_MOTOR_THRUST_SCALE * thrust_to_n * (float)motorPwm->motors.m4;
 
   su_motor_thrust_n[0] = sanitizeFinite(f1);
   su_motor_thrust_n[1] = sanitizeFinite(f2);

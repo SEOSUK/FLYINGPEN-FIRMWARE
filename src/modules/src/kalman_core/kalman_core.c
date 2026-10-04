@@ -298,18 +298,15 @@ static void quatIntegrateGyro(float q[4], const Axis3f* gyro, float dt)
   quatNormalize(q);
 }
 
-// q에서 world z=[0,0,1] 을 body frame으로 돌린 값 (중력 방향 예측)
+// Predicted accelerometer direction in the body frame. Keep this convention
+// identical to the proven Mahony implementation in sensfusion6.c.
 static void quatToBodyZ(const float q[4], float g_est[3])
 {
   float qw = q[0], qx = q[1], qy = q[2], qz = q[3];
 
-  float R02 = 2.0f*qx*qz + 2.0f*qw*qy;
-  float R12 = 2.0f*qy*qz - 2.0f*qw*qx;
-  float R22 = qw*qw - qx*qx - qy*qy + qz*qz;
-
-  g_est[0] = R02;
-  g_est[1] = R12;
-  g_est[2] = R22;
+  g_est[0] = 2.0f * (qx * qz - qw * qy);
+  g_est[1] = 2.0f * (qw * qx + qy * qz);
+  g_est[2] = qw * qw - qx * qx - qy * qy + qz * qz;
 }
 
 static inline float clampf(float x, float lo, float hi)
@@ -353,20 +350,21 @@ static void complementaryUpdate(kalmanCoreData_t* this, const Axis3f* acc, const
   // 2) measured gravity (body)
   // -----------------------------
   const float inv_an = 1.0f / an;
-  // Treat accelerometer as measuring specific force, so gravity direction is
-  // opposite the measured acceleration at rest.
-  float g_meas[3] = { -ax * inv_an, -ay * inv_an, -az * inv_an };
+  // Crazyflie accelerometer convention: a level, stationary vehicle measures
+  // approximately +1 g on body Z. This matches quatToBodyZ(identity), so use
+  // the normalized accelerometer vector directly for the tilt correction.
+  float g_meas[3] = { ax * inv_an, ay * inv_an, az * inv_an };
 
   // predicted gravity from current qComp
   float g_est[3];
   quatToBodyZ(this->qComp, g_est);
 
   // -----------------------------
-  // 3) error = cross(g_est, g_meas)
+  // 3) error = cross(g_meas, g_est), matching sensfusion6 Mahony feedback
   //   roll/pitch only (ez = 0)
   // -----------------------------
-  float ex = g_est[1]*g_meas[2] - g_est[2]*g_meas[1];
-  float ey = g_est[2]*g_meas[0] - g_est[0]*g_meas[2];
+  float ex = g_meas[1]*g_est[2] - g_meas[2]*g_est[1];
+  float ey = g_meas[2]*g_est[0] - g_meas[0]*g_est[2];
   // yaw는 acc로 보정하지 않음
 
   // -----------------------------

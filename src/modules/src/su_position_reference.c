@@ -11,7 +11,6 @@
 
 #define SU_POSITION_VELOCITY_RATE_HZ 100
 #define SU_RAD2DEG (180.0f / (float)M_PI)
-#define SU_YAW_ALIGN_SAT_DEG 70.0f
 #define SU_NORMAL_VELOCITY_LEAKAGE_LPF_HZ 2.0f
 
 static bool referenceInitialized = false;
@@ -700,15 +699,7 @@ static void updateYawFromMobForce(void)
   }
 
   const float targetYawDeg = atan2f(targetDirXY[1], targetDirXY[0]) * SU_RAD2DEG;
-  const float yawErrorDeg = wrapAngleDeg180(targetYawDeg - referenceBaseYawDeg);
-  float yawCorrectionDeg = yawErrorDeg;
-  const float yawAlignMaxDeg = SU_YAW_ALIGN_SAT_DEG;
-
-  if (yawAlignMaxDeg > 0.0f) {
-    yawCorrectionDeg = clampSymmetric(yawCorrectionDeg, yawAlignMaxDeg);
-  }
-
-  referenceYawCorrectionDeg = yawCorrectionDeg;
+  referenceYawCorrectionDeg = wrapAngleDeg180(targetYawDeg - referenceBaseYawDeg);
 }
 
 void suPositionReferenceInit(void)
