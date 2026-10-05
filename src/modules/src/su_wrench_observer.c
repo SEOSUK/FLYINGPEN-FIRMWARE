@@ -14,7 +14,7 @@
 #define SU_OBSERVER_JXX         2.3951e-5f
 #define SU_OBSERVER_JYY         2.3951e-5f
 #define SU_OBSERVER_JZZ         3.2347e-5f
-#define SU_MOTOR_THRUST_SCALE   1.1f
+#define SU_MOTOR_THRUST_SCALE   0.95f
 
 static float su_motor_thrust_n[4];
 static uint16_t su_motor_pwm_ratio[4];
