@@ -31,8 +31,11 @@ static float normalEstimateDotWorld[3] = {0.0f, 0.0f, 0.0f};
 static float contactVelRawWorld[3] = {0.0f, 0.0f, 0.0f};
 static float filteredContactVelWorld[3] = {0.0f, 0.0f, 0.0f};
 static float velocityModulationNormalDotWorld[3] = {0.0f, 0.0f, 0.0f};
+static float contactTangent1World[3] = {0.0f, -1.0f, 0.0f};
+static float contactTangent2World[3] = {0.0f, 0.0f, 1.0f};
 static float curvatureEstimate = 0.0f;
 static float velocityModulationAlpha = 1.0f;
+static float normalForceEstimate = 0.0f;
 static float normalVelocityLeakageRaw = 0.0f;
 static float normalVelocityLeakageLpf = 0.0f;
 static bool contactVelRawValid = false;
@@ -624,6 +627,8 @@ static void applyTangentialVelocityControl(float velocityCmdWorld[3])
   float t1World[3];
   float t2World[3];
   buildContactFrame(normalWorld, t1World, t2World);
+  vec3Copy(contactTangent1World, t1World);
+  vec3Copy(contactTangent2World, t2World);
 
   const float normalCoeff = velocityCmdWorld[0];
   const float tangentialCoeff1 = velocityCmdWorld[1];
@@ -665,6 +670,7 @@ static void applyPreloadVelocityControl(float velocityCmdWorld[3],
   suThrustEffectivenessGetContactForceWorld(worldForce);
 
   const float f_n = vec3Dot(normalWorld, worldForce);
+  normalForceEstimate = f_n;
   const float stateVelocityWorld[3] = {
     state->velocity.x,
     state->velocity.y,
@@ -827,6 +833,7 @@ LOG_ADD(LOG_FLOAT, eePosX, &eeMeasuredLog.x)
 LOG_ADD(LOG_FLOAT, eePosY, &eeMeasuredLog.y)
 LOG_ADD(LOG_FLOAT, eePosZ, &eeMeasuredLog.z)
 LOG_ADD(LOG_FLOAT, forceCmd, &forceDesiredLog)
+LOG_ADD(LOG_FLOAT, fnHat, &normalForceEstimate)
 LOG_GROUP_STOP(suPosRef)
 
 LOG_GROUP_START(suVelMod)
@@ -841,4 +848,10 @@ LOG_ADD(LOG_FLOAT, vcRawZ, &contactVelRawWorld[2])
 LOG_ADD(LOG_FLOAT, vcX, &filteredContactVelWorld[0])
 LOG_ADD(LOG_FLOAT, vcY, &filteredContactVelWorld[1])
 LOG_ADD(LOG_FLOAT, vcZ, &filteredContactVelWorld[2])
+LOG_ADD(LOG_FLOAT, t1X, &contactTangent1World[0])
+LOG_ADD(LOG_FLOAT, t1Y, &contactTangent1World[1])
+LOG_ADD(LOG_FLOAT, t1Z, &contactTangent1World[2])
+LOG_ADD(LOG_FLOAT, t2X, &contactTangent2World[0])
+LOG_ADD(LOG_FLOAT, t2Y, &contactTangent2World[1])
+LOG_ADD(LOG_FLOAT, t2Z, &contactTangent2World[2])
 LOG_GROUP_STOP(suVelMod)
