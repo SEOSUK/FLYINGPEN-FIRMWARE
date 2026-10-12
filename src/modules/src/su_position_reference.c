@@ -33,6 +33,7 @@ static float filteredContactVelWorld[3] = {0.0f, 0.0f, 0.0f};
 static float velocityModulationNormalDotWorld[3] = {0.0f, 0.0f, 0.0f};
 static float contactTangent1World[3] = {0.0f, -1.0f, 0.0f};
 static float contactTangent2World[3] = {0.0f, 0.0f, 1.0f};
+static float curvatureEstimateRaw = 0.0f;
 static float curvatureEstimate = 0.0f;
 static float velocityModulationAlpha = 1.0f;
 static float normalForceEstimate = 0.0f;
@@ -43,6 +44,7 @@ static bool filteredContactVelInitialized = false;
 static bool velocityModulationNormalDotInitialized = false;
 static bool normalEstimateInitialized = false;
 static bool normalEstimateValid = false;
+static bool curvatureEstimateRawValid = false;
 static bool curvatureEstimateValid = false;
 static bool normalVelocityLeakageInitialized = false;
 
@@ -285,6 +287,8 @@ static void resetVelocityModulation(void)
   velocityModulationNormalDotWorld[1] = 0.0f;
   velocityModulationNormalDotWorld[2] = 0.0f;
   velocityModulationNormalDotInitialized = false;
+  curvatureEstimateRaw = 0.0f;
+  curvatureEstimateRawValid = false;
   curvatureEstimate = 0.0f;
   curvatureEstimateValid = false;
   velocityModulationAlpha = 1.0f;
@@ -343,9 +347,14 @@ static bool updateNormalFromDirectionalMemory(const float candidate[3],
     };
     const float scalar = vec3Dot(normalEstimateWorld, lnN);
     const float gamma = clampPositive(su_normal_gamma);
+    const float velNormSq = vec3Dot(filteredContactVelWorld,
+                                    filteredContactVelWorld);
+    const float epsilonV = clampPositive(su_normal_epsilon_v);
+    const float rhoV = (isfinite(velNormSq) && velNormSq > 0.0f) ?
+      velNormSq / (velNormSq + epsilonV) : 0.0f;
 
     for (int i = 0; i < 3; ++i) {
-      normalEstimateDotWorld[i] = gamma *
+      normalEstimateDotWorld[i] = gamma * rhoV *
         (lnN[i] - normalEstimateWorld[i] * scalar);
     }
 
@@ -519,34 +528,37 @@ static void updateVelocityModulationNormalDot(void)
 
 static void updateCurvatureEstimate(void)
 {
-  if (!filteredContactVelInitialized ||
-      !velocityModulationNormalDotInitialized || !normalEstimateValid) {
-    return;
+  // Update raw kappa only when its inputs are reliable. Otherwise hold the
+  // last valid raw sample while continuing to advance the LPF below.
+  if (filteredContactVelInitialized &&
+      velocityModulationNormalDotInitialized && normalEstimateValid) {
+    const float velNormSq = vec3Dot(filteredContactVelWorld,
+                                    filteredContactVelWorld);
+    const float vMin = clampPositive(su_velocity_modulation_v_min);
+    if (isfinite(velNormSq) && velNormSq > 1.0e-12f &&
+        sqrtf(velNormSq) > vMin) {
+      const float curvatureRawCandidate =
+        fabsf(vec3Dot(velocityModulationNormalDotWorld,
+                      filteredContactVelWorld)) / velNormSq;
+      if (isfinite(curvatureRawCandidate)) {
+        curvatureEstimateRaw = curvatureRawCandidate;
+        curvatureEstimateRawValid = true;
+      }
+    }
   }
 
-  const float velNormSq = vec3Dot(filteredContactVelWorld,
-                                  filteredContactVelWorld);
-  const float vMin = clampPositive(su_velocity_modulation_v_min);
-  if (!isfinite(velNormSq) || velNormSq <= 1.0e-12f ||
-      sqrtf(velNormSq) <= vMin) {
-    return;
-  }
-
-  const float curvatureRaw =
-    fabsf(vec3Dot(velocityModulationNormalDotWorld,
-                  filteredContactVelWorld)) / velNormSq;
-  if (!isfinite(curvatureRaw)) {
+  if (!curvatureEstimateRawValid) {
     return;
   }
 
   const float cutoffHz = su_velocity_modulation_kappa_lpf_hz;
   if (!curvatureEstimateValid || isLpfBypassed(cutoffHz)) {
-    curvatureEstimate = curvatureRaw;
+    curvatureEstimate = curvatureEstimateRaw;
   } else {
     const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
     const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
     const float alpha = dt / (tau + dt);
-    curvatureEstimate += alpha * (curvatureRaw - curvatureEstimate);
+    curvatureEstimate += alpha * (curvatureEstimateRaw - curvatureEstimate);
   }
   curvatureEstimateValid = true;
 }
