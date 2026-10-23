@@ -369,7 +369,7 @@ static void stabilizerTask(void* param)
         commanderSetSetpoint(&tempSetpoint, COMMANDER_PRIORITY_HIGHLEVEL);
       }
       commanderGetSetpoint(&setpoint, &state);
-      suPositionReferenceUpdateSetpoint(&setpoint, &state, stabilizerStep);
+      suPositionReferenceUpdateSetpoint(&setpoint, &state, stabilizerStep, areMotorsAllowedToRun);
 
       // Critical for safety, be careful if you modify this code!
       // Let the supervisor update it's view of the current situation

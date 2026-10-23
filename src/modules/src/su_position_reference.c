@@ -12,8 +12,10 @@
 #define SU_POSITION_VELOCITY_RATE_HZ 100
 #define SU_RAD2DEG (180.0f / (float)M_PI)
 #define SU_NORMAL_VELOCITY_LEAKAGE_LPF_HZ 2.0f
+#define SU_POSITION_COMMAND_EPS 1.0e-6f
 
 static bool referenceInitialized = false;
+static bool positionCommandActive = false;
 static point_t referencePosition;
 static point_t eeReferenceLog;
 static point_t eeMeasuredLog;
@@ -68,6 +70,25 @@ static bool isPositionSetpointCandidate(const setpoint_t *setpoint)
          setpoint->mode.roll == modeDisable &&
          setpoint->mode.pitch == modeDisable &&
          setpoint->mode.quat == modeDisable;
+}
+
+static bool hasNonzeroPositionCommand(const setpoint_t *setpoint)
+{
+  return fabsf(setpoint->position.x) > SU_POSITION_COMMAND_EPS ||
+         fabsf(setpoint->position.y) > SU_POSITION_COMMAND_EPS ||
+         fabsf(setpoint->position.z) > SU_POSITION_COMMAND_EPS;
+}
+
+static void writeIdleSetpoint(setpoint_t *setpoint)
+{
+  setpoint->mode.x = modeDisable;
+  setpoint->mode.y = modeDisable;
+  setpoint->mode.z = modeDisable;
+  setpoint->mode.roll = modeDisable;
+  setpoint->mode.pitch = modeDisable;
+  setpoint->mode.yaw = modeDisable;
+  setpoint->mode.quat = modeDisable;
+  setpoint->thrust = 0;
 }
 
 static void rotateBodyOffsetToWorld(const float yawDeg, point_t *offsetWorld)
@@ -723,6 +744,7 @@ static void updateYawFromMobForce(void)
 void suPositionReferenceInit(void)
 {
   referenceInitialized = false;
+  positionCommandActive = false;
   referencePosition.x = 0.0f;
   referencePosition.y = 0.0f;
   referencePosition.z = 0.0f;
@@ -745,16 +767,35 @@ void suPositionReferenceInit(void)
   suPositionTriggerInit();
 }
 
-void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *state, stabilizerStep_t stabilizerStep)
+void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *state,
+                                       stabilizerStep_t stabilizerStep, const bool motorsAllowedToRun)
 {
   suPositionTriggerUpdate();
+
+  if (!motorsAllowedToRun) {
+    referenceInitialized = false;
+    positionCommandActive = false;
+    return;
+  }
 
   if (!setpoint || !isPositionSetpointCandidate(setpoint)) {
     return;
   }
 
+  if (!positionCommandActive) {
+    if (!hasNonzeroPositionCommand(setpoint)) {
+      writeIdleSetpoint(setpoint);
+      return;
+    }
+
+    positionCommandActive = true;
+  }
+
   if (!referenceInitialized) {
-    initializeReference(setpoint, state, suPositionTriggerGetCommandReference());
+    // position.{x,y,z} carries the velocity command in this custom path. Start
+    // its integral at the measured pose instead of treating that command as an
+    // absolute position; this also prevents a thrust step on first activation.
+    initializeReference(NULL, state, suPositionTriggerGetCommandReference());
   }
 
   const uint8_t positionMode = suPositionTriggerGetMode();
