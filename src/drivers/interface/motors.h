@@ -360,4 +360,16 @@ const MotorHealthTestDef* motorsGetHealthTestSettings(uint32_t id);
  */
 float motorsCompensateBatteryVoltage(uint32_t id, float iThrust, float supplyVoltage);
 
+/**
+ * @brief Evaluate the configured motor-voltage-to-thrust model.
+ *
+ * This is the forward model paired with motorsCompensateBatteryVoltage().
+ * It is used when an observer needs the thrust produced by an applied PWM
+ * ratio and the measured supply voltage.
+ *
+ * @param motorVoltage Voltage applied to the motor in V.
+ * @return Modeled motor thrust in N, clamped to zero below the model range.
+ */
+float motorsCalculateThrustFromVoltage(float motorVoltage);
+
 #endif /* __MOTORS_H__ */

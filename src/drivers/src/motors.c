@@ -144,6 +144,25 @@ GPIO_InitTypeDef GPIO_PassthroughOutput =
 // the given supply voltage, see the above eq. 
 //
 // For more information see the corresponding blog entry on "PWM to Thrust"
+float motorsCalculateThrustFromVoltage(float motorVoltage)
+{
+  #ifdef CONFIG_ENABLE_THRUST_BAT_COMPENSATED
+  if (!isfinite(motorVoltage) || motorVoltage <= 0.0f)
+  {
+    return 0.0f;
+  }
+
+  const float thrust = VMOTOR2THRUST0 +
+                       VMOTOR2THRUST1 * motorVoltage +
+                       VMOTOR2THRUST2 * motorVoltage * motorVoltage +
+                       VMOTOR2THRUST3 * motorVoltage * motorVoltage * motorVoltage;
+  return fmaxf(0.0f, thrust);
+  #else
+  (void)motorVoltage;
+  return 0.0f;
+  #endif
+}
+
 float motorsCompensateBatteryVoltage(uint32_t id, float iThrust, float supplyVoltage)
 {
   #ifdef CONFIG_ENABLE_THRUST_BAT_COMPENSATED

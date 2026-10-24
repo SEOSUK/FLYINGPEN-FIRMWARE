@@ -14,7 +14,6 @@
 #define SU_OBSERVER_JXX         2.3951e-5f
 #define SU_OBSERVER_JYY         2.3951e-5f
 #define SU_OBSERVER_JZZ         3.2347e-5f
-#define SU_MOTOR_THRUST_SCALE   0.920f
 
 static float su_motor_thrust_n[4];
 static uint16_t su_motor_pwm_ratio[4];
@@ -189,6 +188,7 @@ void suWrenchObserverInit(void)
 
 void suWrenchObserverUpdate(const state_t *state,
                             const motors_thrust_pwm_t *motorPwm,
+                            float supplyVoltage,
                             const Axis3f *gyro_deg_s,
                             const float vel_from_pos_world[3],
                             float dt)
@@ -196,13 +196,13 @@ void suWrenchObserverUpdate(const state_t *state,
   if (!state || !motorPwm) {
     return;
   }
-  const float thrust_to_n = THRUST_MAX / (float)UINT16_MAX;
   const float gravity_world[3] = {0.0f, 0.0f, -su_mass * 9.81f};
 
-  const float f1 = SU_MOTOR_THRUST_SCALE * thrust_to_n * (float)motorPwm->motors.m1;
-  const float f2 = SU_MOTOR_THRUST_SCALE * thrust_to_n * (float)motorPwm->motors.m2;
-  const float f3 = SU_MOTOR_THRUST_SCALE * thrust_to_n * (float)motorPwm->motors.m3;
-  const float f4 = SU_MOTOR_THRUST_SCALE * thrust_to_n * (float)motorPwm->motors.m4;
+  const float voltage_per_pwm = sanitizeFinite(supplyVoltage) / (float)UINT16_MAX;
+  const float f1 = motorsCalculateThrustFromVoltage(voltage_per_pwm * (float)motorPwm->motors.m1);
+  const float f2 = motorsCalculateThrustFromVoltage(voltage_per_pwm * (float)motorPwm->motors.m2);
+  const float f3 = motorsCalculateThrustFromVoltage(voltage_per_pwm * (float)motorPwm->motors.m3);
+  const float f4 = motorsCalculateThrustFromVoltage(voltage_per_pwm * (float)motorPwm->motors.m4);
 
   su_motor_thrust_n[0] = sanitizeFinite(f1);
   su_motor_thrust_n[1] = sanitizeFinite(f2);
@@ -511,10 +511,10 @@ LOG_ADD(LOG_FLOAT, fInWz, &su_world_force_n[2])        // N, force input used by
 
 // for unit check. keep this. //
 // 각 모터 추력. saturation 0.2N. 꽤 잘 fitting 됨
-LOG_ADD(LOG_FLOAT, f1, &su_motor_thrust_n[0])           // N, motor 1 thrust command (pre-battery-comp, pre-cap)
-LOG_ADD(LOG_FLOAT, f2, &su_motor_thrust_n[1])           // N, motor 2 thrust command (pre-battery-comp, pre-cap)
-LOG_ADD(LOG_FLOAT, f3, &su_motor_thrust_n[2])           // N, motor 3 thrust command (pre-battery-comp, pre-cap)
-LOG_ADD(LOG_FLOAT, f4, &su_motor_thrust_n[3])           // N, motor 4 thrust command (pre-battery-comp, pre-cap)
+LOG_ADD(LOG_FLOAT, f1, &su_motor_thrust_n[0])           // N, motor 1 thrust from applied PWM, filtered VBAT, and voltage model
+LOG_ADD(LOG_FLOAT, f2, &su_motor_thrust_n[1])           // N, motor 2 thrust from applied PWM, filtered VBAT, and voltage model
+LOG_ADD(LOG_FLOAT, f3, &su_motor_thrust_n[2])           // N, motor 3 thrust from applied PWM, filtered VBAT, and voltage model
+LOG_ADD(LOG_FLOAT, f4, &su_motor_thrust_n[3])           // N, motor 4 thrust from applied PWM, filtered VBAT, and voltage model
 LOG_ADD(LOG_FLOAT, tauInBx, &su_body_torque_nm[0])      // N*m, body-frame input torque including CoM-offset contribution
 LOG_ADD(LOG_FLOAT, tauInBy, &su_body_torque_nm[1])      // N*m, body-frame input torque including CoM-offset contribution
 LOG_ADD(LOG_FLOAT, tauInBz, &su_body_torque_nm[2])      // N*m, body-frame input torque including CoM-offset contribution

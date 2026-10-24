@@ -12,6 +12,7 @@ void suWrenchObserverInit(void);
 
 void suWrenchObserverUpdate(const state_t *state,
                             const motors_thrust_pwm_t *motorPwm,
+                            float supplyVoltage,
                             const Axis3f *gyro_deg_s,
                             const float vel_from_pos_world[3],
                             float dt);

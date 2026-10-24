@@ -72,11 +72,12 @@ static bool isPositionSetpointCandidate(const setpoint_t *setpoint)
          setpoint->mode.quat == modeDisable;
 }
 
-static bool hasNonzeroPositionCommand(const setpoint_t *setpoint)
+static bool hasNonzeroVelocityCommand(const setpoint_t *setpoint)
 {
   return fabsf(setpoint->position.x) > SU_POSITION_COMMAND_EPS ||
          fabsf(setpoint->position.y) > SU_POSITION_COMMAND_EPS ||
-         fabsf(setpoint->position.z) > SU_POSITION_COMMAND_EPS;
+         fabsf(setpoint->position.z) > SU_POSITION_COMMAND_EPS ||
+         fabsf(setpoint->attitude.yaw) > SU_POSITION_COMMAND_EPS;
 }
 
 static void writeIdleSetpoint(setpoint_t *setpoint)
@@ -783,7 +784,7 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
   }
 
   if (!positionCommandActive) {
-    if (!hasNonzeroPositionCommand(setpoint)) {
+    if (!hasNonzeroVelocityCommand(setpoint)) {
       writeIdleSetpoint(setpoint);
       return;
     }
@@ -792,9 +793,9 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
   }
 
   if (!referenceInitialized) {
-    // position.{x,y,z} carries the velocity command in this custom path. Start
-    // its integral at the measured pose instead of treating that command as an
-    // absolute position; this also prevents a thrust step on first activation.
+    // position.{x,y,z} and attitude.yaw carry velocity commands in this custom
+    // path. Start their integrals at the measured pose instead of treating the
+    // commands as absolute references; this also prevents a first-step jump.
     initializeReference(NULL, state, suPositionTriggerGetCommandReference());
   }
 
@@ -814,8 +815,6 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
   if (commandReference != lastCommandReference) {
     convertReferencePosition(&referencePosition, lastCommandReference, commandReference, currentReferenceYawDeg);
   }
-
-  referenceBaseYawDeg = wrapAngleDeg180(setpoint->attitude.yaw);
 
   if (positionMode != lastPositionMode) {
     referenceYawCorrectionDeg = 0.0f;
@@ -847,6 +846,8 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
     referencePosition.x += velocityCmdWorld[0] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
     referencePosition.y += velocityCmdWorld[1] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
     referencePosition.z += velocityCmdWorld[2] * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ);
+    referenceBaseYawDeg = wrapAngleDeg180(
+      referenceBaseYawDeg + setpoint->attitude.yaw * (1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ));
 
     if (advancedVelocityControlEnabled) {
       updateYawFromMobForce();

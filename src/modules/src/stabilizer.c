@@ -85,6 +85,7 @@ static control_t control;
 static motors_thrust_uncapped_t motorThrustUncapped;
 static motors_thrust_uncapped_t motorThrustBatCompUncapped;
 static motors_thrust_pwm_t motorPwm;
+static float batteryCompensationSupplyVoltage = 4.2f;
 
 // For scratch storage - never logged or passed to other subsystems.
 static setpoint_t tempSetpoint;
@@ -233,12 +234,13 @@ static void batteryCompensation(const motors_thrust_uncapped_t* motorThrustUncap
 {
   // Low pass on the BatteryVoltage
   float b = 0.01f; // 0.2f = Convergence (95%) in ~10 steps = ~20ms
-  static float supplyVoltage = 4.2;
-  supplyVoltage = supplyVoltage + b*(pmGetBatteryVoltage() - supplyVoltage);
+  batteryCompensationSupplyVoltage = batteryCompensationSupplyVoltage +
+    b * (pmGetBatteryVoltage() - batteryCompensationSupplyVoltage);
 
   for (int motor = 0; motor < STABILIZER_NR_OF_MOTORS; motor++)
   {
-    motorThrustBatCompUncapped->list[motor] = motorsCompensateBatteryVoltage(motor, motorThrustUncapped->list[motor], supplyVoltage);
+    motorThrustBatCompUncapped->list[motor] = motorsCompensateBatteryVoltage(
+      motor, motorThrustUncapped->list[motor], batteryCompensationSupplyVoltage);
   }
 }
 
@@ -407,7 +409,8 @@ static void stabilizerTask(void* param)
         float velFromPosWorld[3];
         suVelFromPosGetWorld(velFromPosWorld);
 
-        suWrenchObserverUpdate(&state, &motorPwm, &sensorData.gyro,
+        suWrenchObserverUpdate(&state, &motorPwm, batteryCompensationSupplyVoltage,
+                               &sensorData.gyro,
                                velFromPosWorld, 1.0f / (float)SU_WRENCH_RATE_HZ);
         suPositionTriggerCalibrationUpdate(&sensorData.acc, 1.0f / (float)SU_WRENCH_RATE_HZ);
         suThrustEffectivenessUpdate(&state, &motorThrustBatCompUncapped, &sensorData.gyro,
