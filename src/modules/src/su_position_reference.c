@@ -32,6 +32,7 @@ static float normalEstimateWorld[3] = {-1.0f, 0.0f, 0.0f};
 static float normalEstimateDotWorld[3] = {0.0f, 0.0f, 0.0f};
 static float contactVelRawWorld[3] = {0.0f, 0.0f, 0.0f};
 static float filteredContactVelWorld[3] = {0.0f, 0.0f, 0.0f};
+static float velocityModulationContactVelWorld[3] = {0.0f, 0.0f, 0.0f};
 static float velocityModulationNormalDotWorld[3] = {0.0f, 0.0f, 0.0f};
 static float contactTangent1World[3] = {0.0f, -1.0f, 0.0f};
 static float contactTangent2World[3] = {0.0f, 0.0f, 1.0f};
@@ -43,6 +44,7 @@ static float normalVelocityLeakageRaw = 0.0f;
 static float normalVelocityLeakageLpf = 0.0f;
 static bool contactVelRawValid = false;
 static bool filteredContactVelInitialized = false;
+static bool velocityModulationContactVelInitialized = false;
 static bool velocityModulationNormalDotInitialized = false;
 static bool normalEstimateInitialized = false;
 static bool normalEstimateValid = false;
@@ -280,6 +282,10 @@ static void resetContactVelocityFilter(void)
   filteredContactVelWorld[1] = 0.0f;
   filteredContactVelWorld[2] = 0.0f;
   filteredContactVelInitialized = false;
+  velocityModulationContactVelWorld[0] = 0.0f;
+  velocityModulationContactVelWorld[1] = 0.0f;
+  velocityModulationContactVelWorld[2] = 0.0f;
+  velocityModulationContactVelInitialized = false;
 }
 
 static void resetNormalEstimator(void)
@@ -437,6 +443,33 @@ static void updateContactPointVelocity(void)
   }
 }
 
+static void updateVelocityModulationContactVelocity(void)
+{
+  if (!filteredContactVelInitialized || !vec3IsFinite(filteredContactVelWorld)) {
+    return;
+  }
+
+  if (!velocityModulationContactVelInitialized) {
+    vec3Copy(velocityModulationContactVelWorld, filteredContactVelWorld);
+    velocityModulationContactVelInitialized = true;
+    return;
+  }
+
+  const float cutoffHz = su_velocity_modulation_velocity_lpf_hz;
+  if (isLpfBypassed(cutoffHz)) {
+    vec3Copy(velocityModulationContactVelWorld, filteredContactVelWorld);
+    return;
+  }
+
+  const float dt = 1.0f / (float)SU_POSITION_VELOCITY_RATE_HZ;
+  const float tau = 1.0f / (2.0f * (float)M_PI * cutoffHz);
+  const float alpha = dt / (tau + dt);
+  for (int i = 0; i < 3; ++i) {
+    velocityModulationContactVelWorld[i] +=
+      alpha * (filteredContactVelWorld[i] - velocityModulationContactVelWorld[i]);
+  }
+}
+
 static void updateNormalEstimator(void)
 {
   normalEstimateValid = false;
@@ -552,16 +585,16 @@ static void updateCurvatureEstimate(void)
 {
   // Update raw kappa only when its inputs are reliable. Otherwise hold the
   // last valid raw sample while continuing to advance the LPF below.
-  if (filteredContactVelInitialized &&
+  if (velocityModulationContactVelInitialized &&
       velocityModulationNormalDotInitialized && normalEstimateValid) {
-    const float velNormSq = vec3Dot(filteredContactVelWorld,
-                                    filteredContactVelWorld);
+    const float velNormSq = vec3Dot(velocityModulationContactVelWorld,
+                                    velocityModulationContactVelWorld);
     const float vMin = clampPositive(su_velocity_modulation_v_min);
     if (isfinite(velNormSq) && velNormSq > 1.0e-12f &&
         sqrtf(velNormSq) > vMin) {
       const float curvatureRawCandidate =
         fabsf(vec3Dot(velocityModulationNormalDotWorld,
-                      filteredContactVelWorld)) / velNormSq;
+                      velocityModulationContactVelWorld)) / velNormSq;
       if (isfinite(curvatureRawCandidate)) {
         curvatureEstimateRaw = curvatureRawCandidate;
         curvatureEstimateRawValid = true;
@@ -834,6 +867,7 @@ void suPositionReferenceUpdateSetpoint(setpoint_t *setpoint, const state_t *stat
     updateContactPointVelocity();
     if (advancedVelocityControlEnabled) {
       updateNormalEstimator();
+      updateVelocityModulationContactVelocity();
       updateVelocityModulationNormalDot();
       updateCurvatureEstimate();
       applyVelocityModulation(velocityCmdWorld);
